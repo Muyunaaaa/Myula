@@ -1,0 +1,457 @@
+// Myula compiler parser
+// Created by: Zimeng Li <zimengli@mail.nwpu.edu.cn>
+//
+// Changelog:
+//      26-02-10: Initial version
+
+use crate::fronted::lexer::{Lexer, token::Token};
+
+pub mod ast;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParserErrorType {
+    UnexpectedToken,
+    UnexpectedEof,
+    InvalidExpression,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParserError {
+    pub err_type: ParserErrorType,
+    pub message: String,
+    pub pos: usize,
+}
+
+pub struct Parser<'a> {
+    lexer: &'a mut Lexer<'a>,
+    current_token: Option<Token>,
+    next_token: Option<Token>,
+    errors: Vec<ParserError>,
+}
+
+impl Parser<'_> {
+    pub fn new<'a>(lexer: &'a mut Lexer<'a>) -> Parser<'a> {
+        let next = lexer.next_token();
+        return Parser {
+            lexer: lexer,
+            current_token: None,
+            next_token: Some(next),
+            errors: vec![],
+        };
+    }
+
+    pub fn get_err(&self) -> &Vec<ParserError> {
+        return &self.errors;
+    }
+
+    pub fn get_lexer<'a>(&self) -> &Lexer<'_> {
+        return &self.lexer;
+    }
+
+    fn emit_err(&mut self, err_type: ParserErrorType, message: String) {
+        let pos = self.lexer.get_pos();
+        self.errors.push(ParserError {
+            err_type: err_type,
+            message: message,
+            pos: pos,
+        });
+    }
+
+    fn advance_tokens(&mut self) {
+        if self.current_token.is_none() {
+            self.current_token = Some(self.lexer.next_token());
+        } else {
+            self.current_token = self.next_token.take();
+        }
+        self.next_token = Some(self.lexer.next_token());
+    }
+
+    fn peek_token(&self) -> &Token {
+        if let Some(tok) = &self.next_token {
+            return tok;
+        } else {
+            return &Token::Eof;
+        }
+    }
+
+    #[allow(dead_code)]
+    fn current_token(&self) -> &Token {
+        if let Some(tok) = &self.current_token {
+            return tok;
+        } else {
+            return &Token::Eof;
+        }
+    }
+
+    fn expect(&mut self, expected: Token) -> bool {
+        if self.peek_token() == &expected {
+            self.advance_tokens();
+            return true;
+        } else {
+            let msg = format!("Expected token {:?}, but found {:?}", expected, self.peek_token());
+            self.emit_err(ParserErrorType::UnexpectedToken, msg);
+            return false;
+        }
+    }
+
+    fn binop_precedence(op: &ast::BinOp) -> Option<u8> {
+        match op {
+            ast::BinOp::Assign => Some(0),
+            ast::BinOp::Or => Some(1),
+            ast::BinOp::And => Some(2),
+            ast::BinOp::Eq | ast::BinOp::Neq
+            | ast::BinOp::Lt | ast::BinOp::Gt
+            | ast::BinOp::Leq | ast::BinOp::Geq
+            => Some(3),
+            ast::BinOp::Add | ast::BinOp::Sub => Some(4),
+            ast::BinOp::Mul | ast::BinOp::Div => Some(5),
+            ast::BinOp::Pow => Some(6),
+            _ => None,
+        }
+    }
+
+    fn is_binop_right_assoc(op: &ast::BinOp) -> bool {
+        match op {
+            ast::BinOp::Pow | ast::BinOp::Concat => true,
+            _ => false,
+        }
+    }
+
+    fn token_to_ast_binop(token: &Token) -> Option<ast::BinOp> {
+        match token {
+            Token::Plus => Some(ast::BinOp::Add),
+            Token::Minus => Some(ast::BinOp::Sub),
+            Token::Asterisk => Some(ast::BinOp::Mul),
+            Token::Slash => Some(ast::BinOp::Div),
+            Token::Hat => Some(ast::BinOp::Pow),
+            Token::Concat => Some(ast::BinOp::Concat),
+            Token::Eq => Some(ast::BinOp::Eq),
+            Token::Neq => Some(ast::BinOp::Neq),
+            Token::Lt => Some(ast::BinOp::Lt),
+            Token::Gt => Some(ast::BinOp::Gt),
+            Token::Leq => Some(ast::BinOp::Leq),
+            Token::Geq => Some(ast::BinOp::Geq),
+            Token::KwAnd => Some(ast::BinOp::And),
+            Token::KwOr => Some(ast::BinOp::Or),
+            Token::Assign => Some(ast::BinOp::Assign),
+            _ => None,
+        }
+    }
+
+    fn parse_unary_or_primary_expression(&mut self) -> Option<ast::Expression> {
+        let token = self.peek_token().clone();
+        match token {
+            // unary operators
+            Token::Minus => {
+                self.advance_tokens();
+                let operand = self.parse_unary_or_primary_expression()?;
+                return Some(ast::Expression::UnOp {
+                    operator: ast::UnOp::Neg,
+                    operand: Box::new(operand),
+                });
+            }
+            Token::Plus => {
+                self.advance_tokens();
+                let operand = self.parse_unary_or_primary_expression()?;
+                return Some(ast::Expression::UnOp {
+                    operator: ast::UnOp::Pos,
+                    operand: Box::new(operand),
+                });
+            }
+            Token::KwNot => {
+                self.advance_tokens();
+                let operand = self.parse_unary_or_primary_expression()?;
+                return Some(ast::Expression::UnOp {
+                    operator: ast::UnOp::Not,
+                    operand: Box::new(operand),
+                });
+            }
+
+            // other
+            Token::Ident(name) => {
+                self.advance_tokens();
+                return Some(ast::Expression::Identifier(name));
+            }
+            Token::NumLit(num) => {
+                self.advance_tokens();
+                return Some(ast::Expression::Literal(ast::Literal::Number(num)));
+            }
+            Token::StrLit(s) => {
+                self.advance_tokens();
+                return Some(ast::Expression::Literal(ast::Literal::String(s)));
+            }
+            Token::KwTrue => {
+                self.advance_tokens();
+                return Some(ast::Expression::Literal(ast::Literal::Boolean(true)));
+            }
+            Token::KwFalse => {
+                self.advance_tokens();
+                return Some(ast::Expression::Literal(ast::Literal::Boolean(false)));
+            }
+            Token::KwNil => {
+                self.advance_tokens();
+                return Some(ast::Expression::Literal(ast::Literal::Nil));
+            }
+
+            // parentheses
+            Token::LParen => {
+                self.advance_tokens(); // consume '('
+                let expr = self.parse_expression()?;
+                if !self.expect(Token::RParen) {
+                    return None;
+                }
+                return Some(expr);
+            }
+            _ => {
+                let msg = format!("Unexpected token {:?} in expression", token);
+                self.emit_err(ParserErrorType::InvalidExpression, msg);
+                return None;
+            }
+
+            // todo: fn calls, table ctors
+        }
+    }
+
+    fn parse_binary_expression_impl(&mut self, min_prec: u8) -> Option<ast::Expression> {
+        let lhs = self.parse_unary_or_primary_expression()?;
+        let mut left_expr = lhs;
+
+        loop {
+            let op = Parser::token_to_ast_binop(self.peek_token());
+            if op.is_none() {
+                break;
+            }
+            let op = op.unwrap();
+
+            let prec = Parser::binop_precedence(&op);
+            if prec.is_none() {
+                break;
+            }
+            let prec = prec.unwrap();
+
+            if prec < min_prec {
+                break;
+            }
+
+            self.advance_tokens(); // consume operator
+
+            let mut next_min_prec = prec;
+            if !Parser::is_binop_right_assoc(&op) {
+                next_min_prec += 1;
+            }
+
+            let rhs = self.parse_binary_expression_impl(next_min_prec);
+            if rhs.is_none() {
+                break;
+            }
+            let rhs = rhs.unwrap();
+
+            left_expr = ast::Expression::BinOp {
+                left: Box::new(left_expr),
+                operator: op,
+                right: Box::new(rhs),
+            };
+        }
+
+        return Some(left_expr);
+    }
+
+    fn parse_binary_expression(&mut self) -> Option<ast::Expression> {
+        self.parse_binary_expression_impl(0)
+    }
+
+    fn parse_expression(&mut self) -> Option<ast::Expression> {
+        self.parse_binary_expression()
+    }
+
+    fn parse_local_decl_statement(&mut self) -> Option<ast::Statement> {
+        self.expect(Token::KwLocal);
+        let mut names: Vec<String> = vec![];
+        loop {
+            match self.peek_token().clone() {
+                Token::Ident(name) => {
+                    names.push(name);
+                    self.advance_tokens();
+                    if self.peek_token() == &Token::Comma {
+                        self.advance_tokens(); // consume ','
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+                Token::Assign => {
+                    break;
+                }
+                _ => {
+                    let msg = format!("Expected identifier in local declaration, found {:?}", self.peek_token());
+                    self.emit_err(ParserErrorType::UnexpectedToken, msg);
+                    return None;
+                }
+            }
+        }
+
+        self.expect(Token::Assign);
+
+        let mut values: Vec<ast::Expression> = vec![];
+        if self.peek_token() == &Token::Assign {
+            self.advance_tokens(); // consume '='
+            loop {
+                let expr = self.parse_expression()?;
+                values.push(expr);
+                if self.peek_token() == &Token::Comma {
+                    self.advance_tokens(); // consume ','
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        return Some(ast::Statement::Declaration {
+            names,
+            values,
+        });
+    }
+
+    fn parse_if_statement(&mut self) -> Option<ast::Statement> {
+        self.expect(Token::KwIf);
+        let cond = self.parse_expression()?;
+
+        self.expect(Token::KwThen);
+        let mut then_branch: Vec<ast::Statement> = vec![];
+        while self.peek_token() != &Token::KwElse
+            && self.peek_token() != &Token::KwElseIf
+            && self.peek_token() != &Token::KwEnd
+        {
+            if let Some(stmt) = self.parse_statement() {
+                then_branch.push(stmt);
+            } else {
+                break;
+            }
+        }
+
+        let mut elif_branches: Vec<(ast::Expression, Vec<ast::Statement>)> = vec![];
+        while self.peek_token() == &Token::KwElseIf {
+            self.advance_tokens(); // consume 'elseif'
+            let elif_cond = self.parse_expression()?;
+            self.expect(Token::KwThen);
+            let mut elif_branch: Vec<ast::Statement> = vec![];
+            while self.peek_token() != &Token::KwElse
+                && self.peek_token() != &Token::KwElseIf
+                && self.peek_token() != &Token::KwEnd
+            {
+                if let Some(stmt) = self.parse_statement() {
+                    elif_branch.push(stmt);
+                } else {
+                    break;
+                }
+            }
+            elif_branches.push((elif_cond, elif_branch));
+        }
+
+        let else_branch = if self.peek_token() == &Token::KwElse {
+            self.advance_tokens(); // consume 'else'
+            let mut else_branch: Vec<ast::Statement> = vec![];
+            while self.peek_token() != &Token::KwEnd {
+                if let Some(stmt) = self.parse_statement() {
+                    else_branch.push(stmt);
+                } else {
+                    break;
+                }
+            }
+            Some(else_branch)
+        } else {
+            None
+        };
+        self.expect(Token::KwEnd);
+
+        Some(ast::Statement::IfStmt {
+            condition: Box::new(cond),
+            then_branch,
+            elif_branches,
+            else_branch,
+        })
+    }
+
+    fn parse_while_statement(&mut self) -> Option<ast::Statement> {
+        self.expect(Token::KwWhile);
+        let condition = self.parse_expression()?;
+        self.expect(Token::KwDo);
+
+        let mut body: Vec<ast::Statement> = vec![];
+        while self.peek_token() != &Token::KwEnd {
+            if let Some(stmt) = self.parse_statement() {
+                body.push(stmt);
+            } else {
+                break;
+            }
+        }
+        self.expect(Token::KwEnd);
+        Some(ast::Statement::WhileStmt {
+            condition: Box::new(condition),
+            body,
+        })
+    }
+
+    fn parse_repeat_statement(&mut self) -> Option<ast::Statement> {
+        self.expect(Token::KwRepeat);
+
+        let mut body: Vec<ast::Statement> = vec![];
+        while self.peek_token() != &Token::KwUntil {
+            if let Some(stmt) = self.parse_statement() {
+                body.push(stmt);
+            } else {
+                break;
+            }
+        }
+        self.expect(Token::KwUntil);
+        let condition = self.parse_expression()?;
+        Some(ast::Statement::RepeatStmt {
+            body,
+            condition: Box::new(condition),
+        })
+    }
+
+    fn parse_statement(&mut self) -> Option<ast::Statement> {
+        let next_tok = self.peek_token().clone();
+        match next_tok {
+            Token::KwLocal => {
+                self.parse_local_decl_statement()
+            }
+            Token::KwIf => {
+                self.parse_if_statement()
+            }
+            Token::KwWhile => {
+                self.parse_while_statement()
+            }
+            Token::KwRepeat => {
+                self.parse_repeat_statement()
+            }
+            _ => {
+                // default is expression statement
+                self.parse_expression()
+                    .map(|expr| ast::Statement::ExprStatement(Box::new(expr)))
+            }
+        }
+    }
+
+    fn parse_program(&mut self) -> ast::Program {
+        let mut body: Vec<ast::Statement> = vec![];
+        loop {
+            if self.peek_token() == &Token::Eof {
+                break;
+            }
+
+            if let Some(stmt) = self.parse_statement() {
+                body.push(stmt);
+            } else {
+                break;
+            }
+        }
+        return ast::Program { body: body };
+    }
+
+    pub fn parse(&mut self) -> ast::Program {
+        return self.parse_program();
+    }
+}

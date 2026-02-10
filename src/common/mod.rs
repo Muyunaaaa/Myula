@@ -1,3 +1,3 @@
 mod object;
-mod value;
 mod opcode;
+pub mod hash;
