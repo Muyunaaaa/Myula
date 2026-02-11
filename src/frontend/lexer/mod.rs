@@ -8,7 +8,7 @@ pub mod token;
 
 use std::vec::Vec;
 
-use crate::fronted::lexer::token::Token;
+use crate::frontend::lexer::token::Token;
 
 #[derive(Debug)]
 pub enum LexerError {
@@ -115,7 +115,7 @@ impl Lexer<'_> {
                 }
                 _ => break,
             }
-        };
+        }
 
         // fractional
         if self.peek_char() == Some('.') {
@@ -128,7 +128,7 @@ impl Lexer<'_> {
                     }
                     _ => break,
                 }
-            };
+            }
         }
 
         let num_str = &self.input[begin_pos..self.pos];
@@ -195,7 +195,7 @@ impl Lexer<'_> {
                 }
                 _ => break,
             }
-        };
+        }
         let ident_str = &self.input[begin_pos..self.pos];
         if let Some(kw_token) = Lexer::is_keyword(ident_str) {
             kw_token
@@ -228,33 +228,31 @@ impl Lexer<'_> {
             Some(ch) if ch.is_ascii_alphabetic() || ch == '_' => self.ident_or_keyword(),
             _ => {
                 match self.advance() {
-                    Some(chr) => {
-                        match chr {
-                            '+' => Token::Plus,
-                            '-' => Token::Minus,
-                            '*' => Token::Asterisk,
-                            '/' => Token::Slash,
-                            '^' => Token::Hat,
-                            '.' => self.double_char_op('.', Token::Concat, Token::Dot),
-                            '=' => self.double_char_op('=', Token::Eq, Token::Assign),
-                            '~' => self.double_char_op('=', Token::Neq, Token::Errno),
-                            '<' => self.double_char_op('=', Token::Leq, Token::Lt),
-                            '>' => self.double_char_op('=', Token::Geq, Token::Gt),
-                            '(' => Token::LParen,
-                            ')' => Token::RParen,
-                            '{' => Token::LBrace,
-                            '}' => Token::RBrace,
-                            '[' => Token::LBracket,
-                            ']' => Token::RBracket,
-                            ',' => Token::Comma,
-                            ';' => Token::Semicolon,
-                            ':' => Token::Colon,
-                            other => {
-                                self.emit_err(LexerError::UnexpectedCharacter(other));
-                                Token::Errno
-                            }
+                    Some(chr) => match chr {
+                        '+' => Token::Plus,
+                        '-' => Token::Minus,
+                        '*' => Token::Asterisk,
+                        '/' => Token::Slash,
+                        '^' => Token::Hat,
+                        '.' => self.double_char_op('.', Token::Concat, Token::Dot),
+                        '=' => self.double_char_op('=', Token::Eq, Token::Assign),
+                        '~' => self.double_char_op('=', Token::Neq, Token::Errno),
+                        '<' => self.double_char_op('=', Token::Leq, Token::Lt),
+                        '>' => self.double_char_op('=', Token::Geq, Token::Gt),
+                        '(' => Token::LParen,
+                        ')' => Token::RParen,
+                        '{' => Token::LBrace,
+                        '}' => Token::RBrace,
+                        '[' => Token::LBracket,
+                        ']' => Token::RBracket,
+                        ',' => Token::Comma,
+                        ';' => Token::Semicolon,
+                        ':' => Token::Colon,
+                        other => {
+                            self.emit_err(LexerError::UnexpectedCharacter(other));
+                            Token::Errno
                         }
-                    }
+                    },
                     None => {
                         // should not reach here
                         unreachable!()

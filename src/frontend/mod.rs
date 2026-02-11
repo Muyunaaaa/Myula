@@ -1,0 +1,44 @@
+pub mod ir;
+pub mod lexer;
+pub mod parser;
+
+#[cfg(test)]
+mod tests {
+    use crate::frontend::ir::IRGenerator;
+    use crate::frontend::lexer::Lexer;
+    use crate::frontend::parser::Parser;
+
+    #[test]
+    fn it_works() {
+        let mut lexer = Lexer::new(
+            "
+        y = 114514.1919810
+        z = 123
+        local x = 10 + 20 * (30 - 5)
+        local out = 0
+        if x >= 100 then
+            out = 0
+        else
+            out = 1
+        end
+        while x < 200 do
+            x = x + 1
+        end
+        repeat
+            x = x + 2
+        until x >= 300
+        ",
+        );
+        let mut parser = Parser::new(&mut lexer);
+
+        let ast = parser.parse();
+        println!("{:#?}", ast);
+        println!("Lexer Errors: {:#?}", parser.get_lexer().get_err());
+        println!("Parser Errors: {:#?}", parser.get_err());
+
+        let mut ir_gen = IRGenerator::new();
+        ir_gen.generate(&ast);
+        println!("{}", ir_gen.get_module().to_string());
+        println!("IR Generation Errors: {:#?}", ir_gen.get_err());
+    }
+}

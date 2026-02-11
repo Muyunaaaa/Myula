@@ -3,10 +3,11 @@
 //
 // Changelog:
 //      26-02-10: Initial version
-
-use crate::fronted::lexer::{Lexer, token::Token};
+//      26-02-11: Minor fixes
 
 pub mod ast;
+
+use crate::frontend::lexer::{Lexer, token::Token};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserErrorType {
@@ -58,11 +59,7 @@ impl Parser<'_> {
     }
 
     fn advance_tokens(&mut self) {
-        if self.current_token.is_none() {
-            self.current_token = Some(self.lexer.next_token());
-        } else {
-            self.current_token = self.next_token.take();
-        }
+        self.current_token = self.next_token.take();
         self.next_token = Some(self.lexer.next_token());
     }
 
@@ -88,7 +85,11 @@ impl Parser<'_> {
             self.advance_tokens();
             return true;
         } else {
-            let msg = format!("Expected token {:?}, but found {:?}", expected, self.peek_token());
+            let msg = format!(
+                "Expected token {:?}, but found {:?}",
+                expected,
+                self.peek_token()
+            );
             self.emit_err(ParserErrorType::UnexpectedToken, msg);
             return false;
         }
@@ -99,10 +100,12 @@ impl Parser<'_> {
             ast::BinOp::Assign => Some(0),
             ast::BinOp::Or => Some(1),
             ast::BinOp::And => Some(2),
-            ast::BinOp::Eq | ast::BinOp::Neq
-            | ast::BinOp::Lt | ast::BinOp::Gt
-            | ast::BinOp::Leq | ast::BinOp::Geq
-            => Some(3),
+            ast::BinOp::Eq
+            | ast::BinOp::Neq
+            | ast::BinOp::Lt
+            | ast::BinOp::Gt
+            | ast::BinOp::Leq
+            | ast::BinOp::Geq => Some(3),
             ast::BinOp::Add | ast::BinOp::Sub => Some(4),
             ast::BinOp::Mul | ast::BinOp::Div => Some(5),
             ast::BinOp::Pow => Some(6),
@@ -206,15 +209,21 @@ impl Parser<'_> {
                 let msg = format!("Unexpected token {:?} in expression", token);
                 self.emit_err(ParserErrorType::InvalidExpression, msg);
                 return None;
-            }
-
-            // todo: fn calls, table ctors
+            } // todo: fn calls, table ctors
         }
     }
 
     fn parse_binary_expression_impl(&mut self, min_prec: u8) -> Option<ast::Expression> {
-        let lhs = self.parse_unary_or_primary_expression()?;
-        let mut left_expr = lhs;
+        let lhs = self.parse_unary_or_primary_expression();
+        if lhs.is_none() {
+            self.emit_err(
+                ParserErrorType::InvalidExpression,
+                "Failed to parse left-hand side expression".to_string(),
+            );
+            return None;
+        }
+
+        let mut left_expr = lhs.unwrap();
 
         loop {
             let op = Parser::token_to_ast_binop(self.peek_token());
@@ -279,11 +288,11 @@ impl Parser<'_> {
                         break;
                     }
                 }
-                Token::Assign => {
-                    break;
-                }
                 _ => {
-                    let msg = format!("Expected identifier in local declaration, found {:?}", self.peek_token());
+                    let msg = format!(
+                        "Expected identifier in local declaration, found {:?}",
+                        self.peek_token()
+                    );
                     self.emit_err(ParserErrorType::UnexpectedToken, msg);
                     return None;
                 }
@@ -293,24 +302,18 @@ impl Parser<'_> {
         self.expect(Token::Assign);
 
         let mut values: Vec<ast::Expression> = vec![];
-        if self.peek_token() == &Token::Assign {
-            self.advance_tokens(); // consume '='
-            loop {
-                let expr = self.parse_expression()?;
-                values.push(expr);
-                if self.peek_token() == &Token::Comma {
-                    self.advance_tokens(); // consume ','
-                    continue;
-                } else {
-                    break;
-                }
+        loop {
+            let expr = self.parse_expression()?;
+            values.push(expr);
+            if self.peek_token() == &Token::Comma {
+                self.advance_tokens(); // consume ','
+                continue;
+            } else {
+                break;
             }
         }
 
-        return Some(ast::Statement::Declaration {
-            names,
-            values,
-        });
+        return Some(ast::Statement::Declaration { names, values });
     }
 
     fn parse_if_statement(&mut self) -> Option<ast::Statement> {
@@ -415,18 +418,10 @@ impl Parser<'_> {
     fn parse_statement(&mut self) -> Option<ast::Statement> {
         let next_tok = self.peek_token().clone();
         match next_tok {
-            Token::KwLocal => {
-                self.parse_local_decl_statement()
-            }
-            Token::KwIf => {
-                self.parse_if_statement()
-            }
-            Token::KwWhile => {
-                self.parse_while_statement()
-            }
-            Token::KwRepeat => {
-                self.parse_repeat_statement()
-            }
+            Token::KwLocal => self.parse_local_decl_statement(),
+            Token::KwIf => self.parse_if_statement(),
+            Token::KwWhile => self.parse_while_statement(),
+            Token::KwRepeat => self.parse_repeat_statement(),
             _ => {
                 // default is expression statement
                 self.parse_expression()
