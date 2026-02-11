@@ -15,11 +15,14 @@ mod tests {
         y = 114514.1919810
         z = 123
         local x = 10 + 20 * (30 - 5)
+        print(w()[1 + 1]()[42][\"hello\"])
         local out = 0
         if x >= 100 then
             out = 0
+            print(out)
         else
             out = 1
+            print(456)
         end
         while x < 200 do
             x = x + 1

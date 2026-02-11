@@ -4,6 +4,7 @@
 // Changelog:
 //      26-02-10: Initial version
 //      26-02-11: Minor fixes
+//      26-02-11: Added function call and indexing parsing
 
 pub mod ast;
 
@@ -12,6 +13,7 @@ use crate::frontend::lexer::{Lexer, token::Token};
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserErrorType {
     UnexpectedToken,
+    UnclosedBrackets,
     UnexpectedEof,
     InvalidExpression,
 }
@@ -141,59 +143,123 @@ impl Parser<'_> {
         }
     }
 
+    fn parse_fn_call_expression(&mut self, callee: ast::Expression) -> Option<ast::Expression> {
+        self.advance_tokens(); // consume '('
+
+        // args
+        let mut args: Vec<ast::Expression> = vec![];
+        if self.peek_token() != &Token::RParen {
+            loop {
+                let arg_expr = self.parse_expression();
+                if arg_expr.is_none() {
+                    self.emit_err(
+                        ParserErrorType::InvalidExpression,
+                        "Function call argument requires a valid expression".to_string(),
+                    );
+                    return None;
+                }
+                args.push(arg_expr.unwrap());
+
+                if self.peek_token() == &Token::Comma {
+                    self.advance_tokens(); // consume ','
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if !self.expect(Token::RParen) {
+            self.emit_err(
+                ParserErrorType::UnclosedBrackets,
+                "Expected ')' after function call arguments".to_string(),
+            );
+            return None;
+        }
+
+        Some(ast::Expression::FnCall {
+            callee: Box::new(callee),
+            arguments: args,
+        })
+    }
+
+    fn parse_index_expression(&mut self, collection: ast::Expression) -> Option<ast::Expression> {
+        self.advance_tokens(); // consume '['
+        let index_expr = self.parse_expression();
+        if index_expr.is_none() {
+            self.emit_err(
+                ParserErrorType::InvalidExpression,
+                "Index expression requires a valid expression".to_string(),
+            );
+            return None;
+        }
+        if !self.expect(Token::RBracket) {
+            self.emit_err(
+                ParserErrorType::UnclosedBrackets,
+                "Expected ']' after index expression".to_string(),
+            );
+            return None;
+        }
+
+        Some(ast::Expression::IndexOf {
+            collection: Box::new(collection),
+            index: Box::new(index_expr.unwrap()),
+        })
+    }
+
     fn parse_unary_or_primary_expression(&mut self) -> Option<ast::Expression> {
         let token = self.peek_token().clone();
-        match token {
+        let simple = match token {
             // unary operators
             Token::Minus => {
                 self.advance_tokens();
                 let operand = self.parse_unary_or_primary_expression()?;
-                return Some(ast::Expression::UnOp {
+                Some(ast::Expression::UnOp {
                     operator: ast::UnOp::Neg,
                     operand: Box::new(operand),
-                });
+                })
             }
             Token::Plus => {
                 self.advance_tokens();
                 let operand = self.parse_unary_or_primary_expression()?;
-                return Some(ast::Expression::UnOp {
+                Some(ast::Expression::UnOp {
                     operator: ast::UnOp::Pos,
                     operand: Box::new(operand),
-                });
+                })
             }
             Token::KwNot => {
                 self.advance_tokens();
                 let operand = self.parse_unary_or_primary_expression()?;
-                return Some(ast::Expression::UnOp {
+                Some(ast::Expression::UnOp {
                     operator: ast::UnOp::Not,
                     operand: Box::new(operand),
-                });
+                })
             }
 
             // other
             Token::Ident(name) => {
                 self.advance_tokens();
-                return Some(ast::Expression::Identifier(name));
+                Some(ast::Expression::Identifier(name))
             }
             Token::NumLit(num) => {
                 self.advance_tokens();
-                return Some(ast::Expression::Literal(ast::Literal::Number(num)));
+                Some(ast::Expression::Literal(ast::Literal::Number(num)))
             }
             Token::StrLit(s) => {
                 self.advance_tokens();
-                return Some(ast::Expression::Literal(ast::Literal::String(s)));
+                Some(ast::Expression::Literal(ast::Literal::String(s)))
             }
             Token::KwTrue => {
                 self.advance_tokens();
-                return Some(ast::Expression::Literal(ast::Literal::Boolean(true)));
+                Some(ast::Expression::Literal(ast::Literal::Boolean(true)))
             }
             Token::KwFalse => {
                 self.advance_tokens();
-                return Some(ast::Expression::Literal(ast::Literal::Boolean(false)));
+                Some(ast::Expression::Literal(ast::Literal::Boolean(false)))
             }
             Token::KwNil => {
                 self.advance_tokens();
-                return Some(ast::Expression::Literal(ast::Literal::Nil));
+                Some(ast::Expression::Literal(ast::Literal::Nil))
             }
 
             // parentheses
@@ -203,14 +269,54 @@ impl Parser<'_> {
                 if !self.expect(Token::RParen) {
                     return None;
                 }
-                return Some(expr);
+                Some(expr)
             }
             _ => {
                 let msg = format!("Unexpected token {:?} in expression", token);
                 self.emit_err(ParserErrorType::InvalidExpression, msg);
-                return None;
+                None
             } // todo: fn calls, table ctors
+        };
+
+        if simple.is_none() {
+            return None;
         }
+        let mut simple = simple.unwrap();
+
+        // postfix exprs: fn calls, indexing
+        loop {
+            let next_tok = self.peek_token().clone();
+            match next_tok {
+                Token::LParen => {
+                    // fn call
+                    let fn_call_expr = self.parse_fn_call_expression(simple);
+                    if fn_call_expr.is_none() {
+                        return None;
+                    }
+
+                    if let Some(expr) = fn_call_expr {
+                        simple = expr;
+                    } else {
+                        return None;
+                    }
+                }
+                Token::LBracket => {
+                    // indexing
+                    let index_expr = self.parse_index_expression(simple);
+                    if index_expr.is_none() {
+                        return None;
+                    }
+                    if let Some(expr) = index_expr {
+                        simple = expr;
+                    } else {
+                        return None;
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        Some(simple)
     }
 
     fn parse_binary_expression_impl(&mut self, min_prec: u8) -> Option<ast::Expression> {

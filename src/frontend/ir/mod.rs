@@ -3,6 +3,7 @@
 //
 // Changelog:
 //      26-02-11: Initial version
+//      26-02-11: Added calling and indexing support
 
 use std::collections::{HashMap, HashSet};
 
@@ -161,11 +162,19 @@ pub enum IRInstruction {
         src: IROperand,
     },
     // %dest = Call %callee, [args]
-    // not implemented yet
+    // Invoke function %callee with arguments [args],
+    // store the return value into %dest
     Call {
         dest: usize,
         callee: IROperand,
         args: Vec<IROperand>,
+    },
+    // %dest = IndexOf %collection, %index
+    // Get the element at %index from %collection,
+    IndexOf {
+        dest: usize,
+        collection: IROperand,
+        index: IROperand,
     },
 }
 
@@ -215,6 +224,18 @@ impl IRInstruction {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("%{} = Call {}, [{}]", dest, callee.to_string(), args_str)
+            }
+            IRInstruction::IndexOf {
+                dest,
+                collection,
+                index,
+            } => {
+                format!(
+                    "%{} = IndexOf {}, {}",
+                    dest,
+                    collection.to_string(),
+                    index.to_string()
+                )
             }
         }
     }
@@ -659,7 +680,38 @@ impl IRGenerator {
             parser::ast::Expression::UnOp { operator, operand } => {
                 return self.generate_unary_expr(operator, operand);
             }
-            _ => unimplemented!(),
+            parser::ast::Expression::FnCall { callee, arguments } => {
+                // any fn
+                let callee_reg = self.generate_expr(callee);
+                // args
+                let mut arg_regs = vec![];
+                for arg in arguments {
+                    let arg_reg = self.generate_expr(arg);
+                    arg_regs.push(arg_reg);
+                }
+
+                let dest_reg = self.alloc_reg();
+                self.emit(IRInstruction::Call {
+                    dest: dest_reg,
+                    callee: callee_reg,
+                    args: arg_regs,
+                });
+
+                return IROperand::Reg(dest_reg);
+            }
+            parser::ast::Expression::IndexOf { collection, index } => {
+                // collection and index
+                let collection_reg = self.generate_expr(collection);
+                let index_reg = self.generate_expr(index);
+
+                let dest_reg = self.alloc_reg();
+                self.emit(IRInstruction::IndexOf {
+                    dest: dest_reg,
+                    collection: collection_reg,
+                    index: index_reg,
+                });
+                return IROperand::Reg(dest_reg);
+            }
         }
     }
 

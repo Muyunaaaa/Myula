@@ -52,6 +52,10 @@ pub enum Expression {
         callee: Box<Expression>,
         arguments: Vec<Expression>,
     },
+    IndexOf {
+        collection: Box<Expression>,
+        index: Box<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
