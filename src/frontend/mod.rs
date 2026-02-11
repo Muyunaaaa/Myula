@@ -12,6 +12,14 @@ mod tests {
     fn it_works() {
         let mut lexer = Lexer::new(
             "
+        local function hello_world()
+            print(\"Hello, World!\")
+        end
+        local function fake_closure()
+            return function(x, y)
+                return x + y
+            end
+        end
         y = 114514.1919810
         z = 123
         local x = 10 + 20 * (30 - 5)

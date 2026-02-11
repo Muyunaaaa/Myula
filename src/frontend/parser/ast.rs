@@ -3,6 +3,7 @@
 //
 // Changelog:
 //      26-02-10: Initial version
+//      26-02-11: Added more AST node types
 
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -63,6 +64,11 @@ pub enum Literal {
     Number(f64),
     String(String),
     Boolean(bool),
+    Function {
+        params: Vec<String>,
+        body: Vec<Statement>,
+        name: Option<String>,
+    },
     Nil,
 }
 

@@ -5,6 +5,7 @@
 //      26-02-10: Initial version
 //      26-02-11: Minor fixes
 //      26-02-11: Added function call and indexing parsing
+//      26-02-11: Added function declaration parsing
 
 pub mod ast;
 
@@ -271,6 +272,14 @@ impl Parser<'_> {
                 }
                 Some(expr)
             }
+
+            // function literal
+            Token::KwFunction => {
+                // function literal
+                let func_lit = self.parse_function_decl_expression()?;
+                Some(func_lit)
+            }
+
             _ => {
                 let msg = format!("Unexpected token {:?} in expression", token);
                 self.emit_err(ParserErrorType::InvalidExpression, msg);
@@ -379,8 +388,122 @@ impl Parser<'_> {
         self.parse_binary_expression()
     }
 
+    fn parse_function_decl_inner(&mut self) -> Option<(Vec<String>, Vec<ast::Statement>)> {
+        self.expect(Token::LParen);
+
+        // parameters
+        let mut params: Vec<String> = vec![];
+        if self.peek_token() != &Token::RParen {
+            loop {
+                match self.peek_token().clone() {
+                    Token::Ident(param_name) => {
+                        params.push(param_name);
+                        self.advance_tokens();
+                        if self.peek_token() == &Token::Comma {
+                            self.advance_tokens(); // consume ','
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+                    _ => {
+                        let msg = format!(
+                            "Expected identifier in function parameters, found {:?}",
+                            self.peek_token()
+                        );
+                        self.emit_err(ParserErrorType::UnexpectedToken, msg);
+                        return None;
+                    }
+                }
+            }
+        }
+
+        self.expect(Token::RParen);
+
+        // function body
+        let mut body: Vec<ast::Statement> = vec![];
+        while self.peek_token() != &Token::KwEnd {
+            if let Some(stmt) = self.parse_statement() {
+                body.push(stmt);
+            } else {
+                break;
+            }
+        }
+        self.expect(Token::KwEnd);
+
+        Some((params, body))
+    }
+
+    fn parse_function_decl_statement(&mut self, is_local: bool) -> Option<ast::Statement> {
+        // dont expect local here, handled in local decl
+
+        self.expect(Token::KwFunction);
+
+        // function name
+        let name = match self.peek_token().clone() {
+            Token::Ident(func_name) => {
+                self.advance_tokens();
+                func_name
+            }
+            _ => {
+                let msg = format!(
+                    "Expected function name identifier, found {:?}. Note that anonymous functions not \
+                    bound to any variable are meaningless!",
+                    self.peek_token()
+                );
+                self.emit_err(ParserErrorType::UnexpectedToken, msg);
+                return None;
+            }
+        };
+
+        let (params, body) = self.parse_function_decl_inner()?;
+
+        // for named functions, we treat them as assignment to a function literal
+        let func_literal = ast::Expression::Literal(ast::Literal::Function {
+            name: Some(name.clone()),
+            params,
+            body,
+        });
+
+        if is_local {
+            // local decl
+            Some(ast::Statement::Declaration {
+                names: vec![name],
+                values: vec![func_literal],
+            })
+        } else {
+            // assignment
+            // global decl actually
+            Some(ast::Statement::ExprStatement(Box::new(
+                ast::Expression::BinOp {
+                    left: Box::new(ast::Expression::Identifier(name)),
+                    operator: ast::BinOp::Assign,
+                    right: Box::new(func_literal),
+                },
+            )))
+        }
+    }
+
+    fn parse_function_decl_expression(&mut self) -> Option<ast::Expression> {
+        self.expect(Token::KwFunction);
+
+        let (params, body) = self.parse_function_decl_inner()?;
+
+        Some(ast::Expression::Literal(ast::Literal::Function {
+            params,
+            body,
+            name: None,
+        }))
+    }
+
     fn parse_local_decl_statement(&mut self) -> Option<ast::Statement> {
         self.expect(Token::KwLocal);
+
+        if self.peek_token() == &Token::KwFunction {
+            // local function declaration
+            return self.parse_function_decl_statement(true);
+        }
+
         let mut names: Vec<String> = vec![];
         loop {
             match self.peek_token().clone() {
@@ -521,6 +644,30 @@ impl Parser<'_> {
         })
     }
 
+    fn parse_return_statement(&mut self) -> Option<ast::Statement> {
+        self.expect(Token::KwReturn);
+
+        let mut values: Vec<ast::Expression> = vec![];
+        loop {
+            let expr = self.parse_expression();
+            if expr.is_none() {
+                // no more expressions
+                break;
+            }
+            let expr = expr.unwrap();
+
+            values.push(expr);
+            if self.peek_token() == &Token::Comma {
+                self.advance_tokens(); // consume ','
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        Some(ast::Statement::ReturnStmt { values })
+    }
+
     fn parse_statement(&mut self) -> Option<ast::Statement> {
         let next_tok = self.peek_token().clone();
         match next_tok {
@@ -528,6 +675,11 @@ impl Parser<'_> {
             Token::KwIf => self.parse_if_statement(),
             Token::KwWhile => self.parse_while_statement(),
             Token::KwRepeat => self.parse_repeat_statement(),
+            Token::KwFunction => {
+                // for local function declarations, handled in local decl
+                self.parse_function_decl_statement(false)
+            }
+            Token::KwReturn => self.parse_return_statement(),
             _ => {
                 // default is expression statement
                 self.parse_expression()

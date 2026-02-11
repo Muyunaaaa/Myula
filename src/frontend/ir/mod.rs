@@ -4,6 +4,8 @@
 // Changelog:
 //      26-02-11: Initial version
 //      26-02-11: Added calling and indexing support
+//      26-02-11: Added function declaration support, both named and anonymous
+//      26-02-11: Some documentation
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,6 +14,8 @@ use crate::frontend::parser;
 pub struct IRGenerator {
     module: IRModule,
     function_contexts: Vec<IRFunctionContext>,
+
+    next_anonymous_func_id: usize,
 
     errors: Vec<IRGeneratorError>,
 
@@ -48,7 +52,14 @@ pub enum IRGeneratorError {
 
 #[derive(Debug, Clone)]
 pub enum IROperand {
-    Reg(usize), // virtual register
+    // virtual register
+    Reg(usize),
+    // function prototype name
+    // you can think of it as a function type
+    // do not use it directly except in FnProto instruction
+    // to use the underlying function, you need to instantiate it first
+    // with FnProto instruction
+    Proto(String),
     // for constants, when emitting bytecode,
     // the values should be put into constant pool
     ImmFloat(f64),  // immediate float value
@@ -62,6 +73,7 @@ impl IROperand {
     pub fn to_string(&self) -> String {
         match self {
             IROperand::Reg(reg) => format!("%{}", reg),
+            IROperand::Proto(name) => format!("@{}", name),
             IROperand::ImmFloat(f) => format!("${}", f),
             IROperand::ImmBool(b) => format!("${}", b),
             IROperand::ImmStr(s) => format!("$\"{}\"", s),
@@ -176,6 +188,14 @@ pub enum IRInstruction {
         collection: IROperand,
         index: IROperand,
     },
+    // %dest = FnProto @func_name
+    // Instantiate a function prototype @func_name,
+    // store the function reference into %dest
+    // todo: limitations in handling upvalues
+    FnProto {
+        dest: usize,
+        func_proto: IROperand,
+    },
 }
 
 impl IRInstruction {
@@ -237,10 +257,18 @@ impl IRInstruction {
                     index.to_string()
                 )
             }
+            IRInstruction::FnProto {
+                dest,
+                func_proto: func_name,
+            } => {
+                format!("%{} = FnProto {}", dest, func_name.to_string())
+            }
         }
     }
 }
 
+// a terminator is a special instruction that ends a basic block, 
+// it can be a return, jump or branch instruction
 #[derive(Debug, Clone)]
 pub enum IRTerminator {
     Return(Vec<IROperand>),
@@ -284,6 +312,8 @@ impl IRTerminator {
     }
 }
 
+// a basic block is a sequence of instructions 
+// that has only one entry point and one exit point
 #[derive(Debug, Clone)]
 pub struct IRBasicBlock {
     pub id: usize,
@@ -310,6 +340,23 @@ struct IRActiveBlock {
     pub instructions: Vec<IRInstruction>,
 }
 
+// a function prototype, which is a template for function instances
+// it contains the function name, parameters and body (basic blocks)
+//
+// as for the calling convention, the parameters are represented as virtual registers,
+// so if a function has n parameters, the prototype should expect 
+// virtual registers %0 to %(n-1) as parameters
+// another calling convention design is that,
+// if no return value is specified, the function will return a unit value
+// you can handle this either by generating an nil or a unit value
+// but there's no unit value in Lua spec, which is f*cking stupid
+//
+// by default, if a function is declared without a name, 
+// it will be treated as an anonymous function literal,
+// and the prototype will be named with a generated unique name 
+// like __anon_fn_0, __anon_fn_1, etc.
+//
+// just pay attention, this is very important. - Li
 #[derive(Debug, Clone)]
 pub struct IRFunction {
     pub name: String,
@@ -325,12 +372,18 @@ impl IRFunction {
             .map(|bb| bb.to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        format!(
-            "function {}({}) {{\n{}\n}}",
-            self.name,
-            self.params.join(", "),
-            bbs_str
-        )
+        let params = self
+            .params
+            .iter()
+            .zip(0..)
+            .map(|(p, i)| format!("param {}: %{}", p, i))
+            .collect::<Vec<_>>();
+        let param_str = if params.is_empty() {
+            "void"
+        } else {
+            &params.join(", ")
+        };
+        format!("function {}({}) {{\n{}\n}}", self.name, param_str, bbs_str)
     }
 }
 
@@ -361,6 +414,7 @@ impl IRGenerator {
         return IRGenerator {
             module: IRModule { functions: vec![] },
             function_contexts: vec![],
+            next_anonymous_func_id: 0,
             errors: vec![],
             scope_stack: vec![],
         };
@@ -397,6 +451,12 @@ impl IRGenerator {
         id
     }
 
+    fn alloc_anonymous_func_name(&mut self) -> String {
+        let id = self.next_anonymous_func_id;
+        self.next_anonymous_func_id += 1;
+        format!("__anon_fn_{}", id)
+    }
+
     fn open_bb(&mut self) -> usize {
         let id = self.alloc_bb_id();
         self.open_bb_lazy(id)
@@ -429,10 +489,10 @@ impl IRGenerator {
         self.current_context().active_block.is_some()
     }
 
-    fn open_function(&mut self, name: String) {
+    fn open_function(&mut self, name: String, params: Vec<String>) {
         self.function_contexts.push(IRFunctionContext {
             name,
-            params: vec![],
+            params: params,
             active_block: None,
             basic_blocks: vec![],
             next_reg: 0,
@@ -669,6 +729,21 @@ impl IRGenerator {
                 parser::ast::Literal::String(s) => return IROperand::ImmStr(s.clone()),
                 parser::ast::Literal::Boolean(b) => return IROperand::ImmBool(*b),
                 parser::ast::Literal::Nil => return IROperand::Nil,
+                parser::ast::Literal::Function { name, params, body } => {
+                    // function literal
+                    // this generates a function prototype and returns the function reference
+                    let func_operand = self.generate_fn_decl_impl(true, name, params, body);
+
+                    // instantiate the function prototype
+                    let dest_reg = self.alloc_reg();
+                    self.emit(IRInstruction::FnProto {
+                        dest: dest_reg,
+                        func_proto: func_operand,
+                    });
+
+                    let func_operand = IROperand::Reg(dest_reg);
+                    return func_operand;
+                }
             },
             parser::ast::Expression::BinOp {
                 left,
@@ -818,6 +893,54 @@ impl IRGenerator {
         self.open_bb_lazy(merge_bb_id);
     }
 
+    fn generate_fn_decl_impl(
+        &mut self,
+        is_local: bool,
+        name: &Option<String>,
+        params: &Vec<String>,
+        body: &Vec<parser::ast::Statement>,
+    ) -> IROperand {
+        let func_name = if let Some(name) = name {
+            name.clone()
+        } else {
+            self.alloc_anonymous_func_name()
+        };
+
+        // create a new function context
+        self.open_function(func_name.clone(), params.clone());
+
+        // declare parameters as local variables
+        for param in params {
+            let reg = self.alloc_reg();
+            self.decl_local(param.clone(), reg);
+        }
+
+        // generate function body
+        self.open_bb();
+        for stmt in body {
+            self.generate_stmt(stmt);
+        }
+
+        // if the block is still open, close it with a return
+        if self.has_active_bb() {
+            self.close_bb(IRTerminator::Return(vec![IROperand::Unit]));
+        }
+
+        self.close_function();
+
+        // return the function prototype as an operand
+        IROperand::Proto(func_name)
+    }
+
+    fn generate_return_stmt(&mut self, values: &Vec<parser::ast::Expression>) {
+        let mut ret_operands = vec![];
+        for val in values {
+            let val_reg = self.generate_expr(val);
+            ret_operands.push(val_reg);
+        }
+        self.close_bb(IRTerminator::Return(ret_operands));
+    }
+
     fn generate_stmt(&mut self, stmt: &parser::ast::Statement) {
         match stmt {
             parser::ast::Statement::ExprStatement(expr) => {
@@ -857,6 +980,9 @@ impl IRGenerator {
             parser::ast::Statement::RepeatStmt { body, condition } => {
                 self.generate_repeat_expr(body, condition);
             }
+            parser::ast::Statement::ReturnStmt { values } => {
+                self.generate_return_stmt(values);
+            }
             _ => unimplemented!(),
         }
     }
@@ -865,7 +991,7 @@ impl IRGenerator {
         // 'global' local scope
         // we just put the whole program in a special function named "_start"
         // for top level stmts
-        self.open_function("_start".to_string());
+        self.open_function("_start".to_string(), vec![]);
 
         self.open_bb();
         for stmt in &module.body {
