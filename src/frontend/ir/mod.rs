@@ -6,6 +6,7 @@
 //      26-02-11: Added calling and indexing support
 //      26-02-11: Added function declaration support, both named and anonymous
 //      26-02-11: Some documentation
+//      26-02-12: Added FallThrough terminator
 
 use std::collections::{HashMap, HashSet};
 
@@ -271,15 +272,23 @@ impl IRInstruction {
 // it can be a return, jump or branch instruction
 #[derive(Debug, Clone)]
 pub enum IRTerminator {
+    // Returns from the function with the given operands
     Return(Vec<IROperand>),
-    // br %label
+    // Jump %label
+    // unconditional jump to the given label
     Jump(usize),
-    // br %cond, %then_label, %else_label
+    // Branch %cond, %then_label, %else_label
+    // conditional branch based on %cond
+    // if %cond is true, jump to %then_label
+    // otherwise, %else_label
     Branch {
         cond: IROperand,
         br_true: usize,
         br_false: usize,
     },
+    // FallThrough
+    // no operation, just fall through to the next basic block
+    FallThrough,
 }
 
 impl IRTerminator {
@@ -308,6 +317,9 @@ impl IRTerminator {
                     br_false
                 )
             }
+            IRTerminator::FallThrough => {
+                "FallThrough".to_string()
+            }
         }
     }
 }
@@ -323,14 +335,19 @@ pub struct IRBasicBlock {
 
 impl IRBasicBlock {
     pub fn to_string(&self) -> String {
-        let instrs_str = self
+        let mut instrs_str = self
             .instructions
             .iter()
             .map(|instr| format!("  {}", instr.to_string()))
             .collect::<Vec<_>>()
             .join("\n");
         let term_str = format!("  {}", self.terminator.to_string());
-        format!("_Tag{}:\n{}\n{}", self.id, instrs_str, term_str)
+        instrs_str = if instrs_str.is_empty() {
+            "".to_string()
+        } else {
+            format!("{}\n", instrs_str)
+        };
+        format!("_Tag{}:\n{}{}", self.id, instrs_str, term_str)
     }
 }
 
@@ -836,8 +853,8 @@ impl IRGenerator {
         let body_bb_id = self.alloc_bb_id();
         let merge_bb_id = self.alloc_bb_id();
 
-        // jump to condition check
-        self.close_bb(IRTerminator::Jump(cond_bb_id));
+        // fall through to condition check first
+        self.close_bb(IRTerminator::FallThrough);
 
         // condition check block
         self.open_bb_lazy(cond_bb_id);
@@ -869,16 +886,16 @@ impl IRGenerator {
         let cond_bb_id = self.alloc_bb_id();
         let merge_bb_id = self.alloc_bb_id();
 
-        // jump to loop body first
-        self.close_bb(IRTerminator::Jump(body_bb_id));
+        // fall through to loop body first
+        self.close_bb(IRTerminator::FallThrough);
 
         // loop body block
         self.open_bb_lazy(body_bb_id);
         for stmt in body {
             self.generate_stmt(stmt);
         }
-        // after body, jump to condition check
-        self.close_bb(IRTerminator::Jump(cond_bb_id));
+        // after body, fall through to condition check
+        self.close_bb(IRTerminator::FallThrough);
 
         // condition check block
         self.open_bb_lazy(cond_bb_id);
