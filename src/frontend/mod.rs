@@ -20,6 +20,11 @@ mod tests {
                 return x + y
             end
         end
+        if true then
+            local test = 123
+        else
+            local test = 456
+        end
         y = 114514.1919810
         z = 123
         local x = 10 + 20 * (30 - 5)

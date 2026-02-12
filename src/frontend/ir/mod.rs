@@ -7,6 +7,10 @@
 //      26-02-11: Added function declaration support, both named and anonymous
 //      26-02-11: Some documentation
 //      26-02-12: Added FallThrough terminator
+//      26-02-12: [Breaking Change]
+//                AddrLocal instruction renamed from AllocLocal
+//                to better reflect its purpose
+//                Provided details about local vars in function prototype
 
 use std::collections::{HashMap, HashSet};
 
@@ -25,8 +29,10 @@ pub struct IRGenerator {
 
 #[derive(Debug, Clone)]
 pub struct IRScope {
-    variables: HashMap<String, usize>, // variable name -> register number
+    local_variables: HashMap<String, IRLocalVarSlot>, // local variable name -> slot number
 }
+
+type IRLocalVarSlot = usize;
 
 #[derive(Debug, Clone)]
 struct IRFunctionContext {
@@ -48,13 +54,15 @@ pub struct IRGlobalScope {
 #[derive(Debug, Clone)]
 pub enum IRGeneratorError {
     UndefinedVariable(String),
-    RedeclarationOfVariable(String),
 }
 
 #[derive(Debug, Clone)]
 pub enum IROperand {
     // virtual register
     Reg(usize),
+    // Local variable slot, used for AddrLocal instruction,
+    // DOES NOT use this directly as an operand in any other instructions
+    Slot(IRLocalVarSlot),
     // function prototype name
     // you can think of it as a function type
     // do not use it directly except in FnProto instruction
@@ -75,6 +83,7 @@ impl IROperand {
         match self {
             IROperand::Reg(reg) => format!("%{}", reg),
             IROperand::Proto(name) => format!("@{}", name),
+            IROperand::Slot(slot) => format!("%local_{}", slot),
             IROperand::ImmFloat(f) => format!("${}", f),
             IROperand::ImmBool(b) => format!("${}", b),
             IROperand::ImmStr(s) => format!("$\"{}\"", s),
@@ -141,23 +150,29 @@ pub enum IRInstruction {
         operator: IRUnOp,
         src: IROperand,
     },
-    // %dest = AllocLocal
-    // allocate a local variable and return its address,
+    // %dest = AllocLocal $slot_id
+    // allocate/use an existing local variable and return its address,
     // address stored to %dest
     // when generating bytecode, this should be mapped to a stack slot
     // or similar stuff
-    AllocLocal {
+    //
+    // see: IRFunction::local_variables for mapping
+    AddrLocal {
         dest: usize,
+        slot: IROperand,
     },
     // %dest = LoadLocal %src
-    // load the value of local variable at address %src into %dest
+    // load the value of local variable at slot %src into %dest
+    // %src is the *ADDRESS* of the local variable, *not* the slot number,
+    // so to use this, you need to AddrLocal first!!
     LoadLocal {
         dest: usize,
-        src: usize,
+        src: IROperand,
     },
-    // StoreLocal %dest, %src
+    // StoreLocal %dst, %src
     // store the value of %src into local variable at address %dst
-    // %dst is the virtual register holding the address of the local variable
+    // %dst is the *ADDRESS* of the local variable, *NOT* the slot number,
+    // so to use this, you need to AddrLocal first, like in LoadLocal
     StoreLocal {
         dst: usize,
         src: IROperand,
@@ -223,14 +238,14 @@ impl IRInstruction {
             } => {
                 format!("%{} = {} {}", dest, operator.to_string(), src.to_string())
             }
-            IRInstruction::AllocLocal { dest } => {
-                format!("%{} = AllocLocal", dest)
+            IRInstruction::AddrLocal { dest, slot } => {
+                format!("%{} = AddrLocal {}", dest, slot.to_string())
             }
             IRInstruction::LoadLocal { dest, src } => {
-                format!("%{} = LoadLocal %{}", dest, src)
+                format!("%{} = LoadLocal ({})", dest, src.to_string())
             }
             IRInstruction::StoreLocal { dst, src } => {
-                format!("StoreLocal %{} {}", dst, src.to_string())
+                format!("StoreLocal (%{}) {}", dst, src.to_string())
             }
             IRInstruction::LoadGlobal { dest, name } => {
                 format!("%{} = LoadGlobal \"{}\"", dest, name)
@@ -268,7 +283,7 @@ impl IRInstruction {
     }
 }
 
-// a terminator is a special instruction that ends a basic block, 
+// a terminator is a special instruction that ends a basic block,
 // it can be a return, jump or branch instruction
 #[derive(Debug, Clone)]
 pub enum IRTerminator {
@@ -317,14 +332,12 @@ impl IRTerminator {
                     br_false
                 )
             }
-            IRTerminator::FallThrough => {
-                "FallThrough".to_string()
-            }
+            IRTerminator::FallThrough => "FallThrough".to_string(),
         }
     }
 }
 
-// a basic block is a sequence of instructions 
+// a basic block is a sequence of instructions
 // that has only one entry point and one exit point
 #[derive(Debug, Clone)]
 pub struct IRBasicBlock {
@@ -361,16 +374,16 @@ struct IRActiveBlock {
 // it contains the function name, parameters and body (basic blocks)
 //
 // as for the calling convention, the parameters are represented as virtual registers,
-// so if a function has n parameters, the prototype should expect 
+// so if a function has n parameters, the prototype should expect
 // virtual registers %0 to %(n-1) as parameters
 // another calling convention design is that,
 // if no return value is specified, the function will return a unit value
 // you can handle this either by generating an nil or a unit value
 // but there's no unit value in Lua spec, which is f*cking stupid
 //
-// by default, if a function is declared without a name, 
+// by default, if a function is declared without a name,
 // it will be treated as an anonymous function literal,
-// and the prototype will be named with a generated unique name 
+// and the prototype will be named with a generated unique name
 // like __anon_fn_0, __anon_fn_1, etc.
 //
 // just pay attention, this is very important. - Li
@@ -379,10 +392,22 @@ pub struct IRFunction {
     pub name: String,
     pub params: Vec<String>,
     pub basic_blocks: Vec<IRBasicBlock>,
+    pub local_variables: HashMap<String, IRLocalVarSlot>, // local variable name -> slot number
 }
 
 impl IRFunction {
     pub fn to_string(&self) -> String {
+        let mut local_vars_str = self
+            .local_variables
+            .iter()
+            .map(|(name, slot)| (slot, format!(";  %local_{} = {}", slot, name)))
+            .collect::<Vec<_>>();
+        local_vars_str.sort_by_key(|(slot, _)| *slot);
+        let local_vars_str = local_vars_str
+            .iter()
+            .map(|(_, s)| s.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
         let bbs_str = self
             .basic_blocks
             .iter()
@@ -400,7 +425,10 @@ impl IRFunction {
         } else {
             &params.join(", ")
         };
-        format!("function {}({}) {{\n{}\n}}", self.name, param_str, bbs_str)
+        format!(
+            "function {}({}) {{\n{}\n{}}}",
+            self.name, param_str, local_vars_str, bbs_str
+        )
     }
 }
 
@@ -522,6 +550,13 @@ impl IRGenerator {
 
     fn close_function(&mut self) {
         // leave the function scope
+        let local_vars = self
+            .scope_stack
+            .last()
+            .expect("No active scope to get local variables")
+            .local_variables
+            .clone();
+
         self.pop_scope();
 
         let ctx = self
@@ -532,6 +567,7 @@ impl IRGenerator {
             name: ctx.name,
             params: ctx.params,
             basic_blocks: ctx.basic_blocks,
+            local_variables: local_vars,
         };
         self.module.functions.push(func);
     }
@@ -542,7 +578,7 @@ impl IRGenerator {
 
     fn push_scope(&mut self) {
         self.scope_stack.push(IRScope {
-            variables: HashMap::new(),
+            local_variables: HashMap::new(),
         });
     }
 
@@ -550,17 +586,20 @@ impl IRGenerator {
         self.scope_stack.pop();
     }
 
-    fn decl_local(&mut self, name: String, reg: usize) {
+    // declaring a local variable includes
+    fn decl_local(&mut self, name: String) -> IRLocalVarSlot {
         if let Some(scope) = self.scope_stack.last_mut() {
-            scope.variables.insert(name, reg);
+            let slot = scope.local_variables.len();
+            scope.local_variables.insert(name.clone(), slot);
+            slot
         } else {
             panic!("No active scope to declare local variable");
         }
     }
 
-    fn find_local(&self, name: &String) -> Option<usize> {
+    fn find_local(&self, name: &String) -> Option<IRLocalVarSlot> {
         if let Some(scope) = self.scope_stack.last() {
-            return scope.variables.get(name).cloned();
+            return scope.local_variables.get(name).cloned();
         }
         None
     }
@@ -569,7 +608,7 @@ impl IRGenerator {
         // check local scopes from innermost to outermost
         let mut is_first = true;
         for scope in self.scope_stack.iter().rev() {
-            if scope.variables.contains_key(name) {
+            if scope.local_variables.contains_key(name) {
                 if is_first {
                     return Some(IRValueScope::Local);
                 } else {
@@ -603,15 +642,23 @@ impl IRGenerator {
                     Some(IRValueScope::Local) => {
                         // local variable
                         // find the address (register) of the local variable
-                        let reg = self.find_local(name);
-                        if reg.is_none() {
+                        let slot = self.find_local(name);
+                        if slot.is_none() {
                             self.emit_err(IRGeneratorError::UndefinedVariable(name.clone()));
                             return src;
                         }
+                        let slot = slot.unwrap();
 
-                        let reg = reg.unwrap();
+                        // get the address of the local variable by slot
+                        let addr_reg = self.alloc_reg();
+                        self.emit(IRInstruction::AddrLocal {
+                            dest: addr_reg,
+                            slot: IROperand::Slot(slot),
+                        });
+
+                        // store the value into the local variable
                         self.emit(IRInstruction::StoreLocal {
-                            dst: reg,
+                            dst: addr_reg,
                             src: src.clone(),
                         });
                         return src;
@@ -709,18 +756,20 @@ impl IRGenerator {
                 match scope {
                     Some(IRValueScope::Local) => {
                         // local variable
-                        // find the address (register) of the local variable
-                        let reg = self.find_local(name);
-                        if reg.is_none() {
-                            self.emit_err(IRGeneratorError::UndefinedVariable(name.clone()));
-                            return IROperand::Nil;
-                        }
+                        // find the slot of the local variable
+                        let slot = self.find_local(name).unwrap();
 
-                        let reg = reg.unwrap();
+                        // get the address of the local variable by slot
+                        let addr_reg = self.alloc_reg();
+                        self.emit(IRInstruction::AddrLocal {
+                            dest: addr_reg,
+                            slot: IROperand::Slot(slot),
+                        });
+
                         let dest_reg = self.alloc_reg();
                         self.emit(IRInstruction::LoadLocal {
                             dest: dest_reg,
-                            src: reg,
+                            src: IROperand::Reg(addr_reg),
                         });
                         return IROperand::Reg(dest_reg);
                     }
@@ -928,8 +977,7 @@ impl IRGenerator {
 
         // declare parameters as local variables
         for param in params {
-            let reg = self.alloc_reg();
-            self.decl_local(param.clone(), reg);
+            self.decl_local(param.clone());
         }
 
         // generate function body
@@ -968,19 +1016,32 @@ impl IRGenerator {
                     let src = self.generate_expr(value);
                     // by default, 'Declaration' is for local variables
                     let scope = self.var_scope(name);
-                    if scope == Some(IRValueScope::Local) {
+                    let slot = if scope == Some(IRValueScope::Local) {
                         // redefinition of local variable in the same scope
-                        self.emit_err(IRGeneratorError::RedeclarationOfVariable(name.clone()));
-                        continue;
-                    }
+                        // this can happen, for example, in:
+                        // if cond then
+                        //     local x = 1
+                        // else
+                        //     local x = 2 -- redefinition in the same scope
+                        // end
+                        //
+                        // if already declared, just use the existing register
+                        self.find_local(name).unwrap()
+                    } else {
+                        // otherwise, declare a new local variable
+                        self.decl_local(name.clone())
+                    };
 
-                    let reg = self.alloc_reg();
-                    self.emit(IRInstruction::AllocLocal { dest: reg });
+                    let addr_reg = self.alloc_reg();
+                    self.emit(IRInstruction::AddrLocal {
+                        dest: addr_reg,
+                        slot: IROperand::Slot(slot),
+                    });
+
                     self.emit(IRInstruction::StoreLocal {
-                        dst: reg,
+                        dst: addr_reg,
                         src: src.clone(),
                     });
-                    self.decl_local(name.clone(), reg);
                 }
             }
             parser::ast::Statement::IfStmt {
