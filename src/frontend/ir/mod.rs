@@ -13,6 +13,8 @@
 //                Provided details about local vars in function prototype
 //     26-02-12: Added LoadImm instruction for loading immediate values
 //     26-02-12: Added Drop instruction for discarding values that are not needed
+//     26-02-12: Now *Global instructions require a register to hold the var name,
+//               instead of directly using the name as an operand,
 
 use std::collections::{HashMap, HashSet};
 
@@ -193,14 +195,14 @@ pub enum IRInstruction {
     // load the value of global variable "name" into %dest
     LoadGlobal {
         dest: usize,
-        name: String,
+        name: IROperand,
     },
     // StoreGlobal "name" %src
     // store the value of %src into global variable "name"
     // returns the value stored, same as StoreLocal, for chained assignment support
     StoreGlobal {
         dest: usize,
-        name: String,
+        name: IROperand,
         src: IROperand,
     },
     // %nil = Drop %src
@@ -276,10 +278,10 @@ impl IRInstruction {
                 format!("%{} = StoreLocal (%{}) {}", dest, dst, src.to_string())
             }
             IRInstruction::LoadGlobal { dest, name } => {
-                format!("%{} = LoadGlobal \"{}\"", dest, name)
+                format!("%{} = LoadGlobal {}", dest, name.to_string())
             }
             IRInstruction::StoreGlobal { dest, name, src } => {
-                format!("%{} = StoreGlobal \"{}\" {}", dest, name, src.to_string())
+                format!("%{} = StoreGlobal {} {}", dest, name.to_string(), src.to_string())
             }
             IRInstruction::Drop { src } => {
                 format!("%nil = Drop {}", src.to_string())
@@ -702,11 +704,18 @@ impl IRGenerator {
                     }
                     Some(IRValueScope::Global) | None => {
                         // global variable
+                        // first generate a LoadConst instruction to load the global variable name
+                        let name_reg = self.alloc_reg();
+                        self.emit(IRInstruction::LoadImm {
+                            dest: name_reg,
+                            value: IROperand::ImmStr(name.clone()),
+                        });
+
                         // if the variable is not declared, then also default to global
                         let dest_reg = self.alloc_reg();
                         self.emit(IRInstruction::StoreGlobal {
                             dest: dest_reg,
-                            name: name.clone(),
+                            name: IROperand::Reg(name_reg),
                             src: src.clone(),
                         });
                         return IROperand::Reg(dest_reg);
@@ -835,10 +844,18 @@ impl IRGenerator {
                         // global variable
                         // if the variable is not declared, then also default to global load
                         // however this can fail at runtime if the variable is not defined
+
+                        // load name
+                        let name_reg = self.alloc_reg();
+                        self.emit(IRInstruction::LoadImm {
+                            dest: name_reg,
+                            value: IROperand::ImmStr(name.clone()),
+                        });
+
                         let dest_reg = self.alloc_reg();
                         self.emit(IRInstruction::LoadGlobal {
                             dest: dest_reg,
-                            name: name.clone(),
+                            name: IROperand::Reg(name_reg),
                         });
                         return IROperand::Reg(dest_reg);
                     }
