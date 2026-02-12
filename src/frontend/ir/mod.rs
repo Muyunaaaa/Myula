@@ -11,6 +11,7 @@
 //                AddrLocal instruction renamed from AllocLocal
 //                to better reflect its purpose
 //                Provided details about local vars in function prototype
+//     26-02-12: Added LoadImm instruction for loading immediate values
 
 use std::collections::{HashMap, HashSet};
 
@@ -71,6 +72,7 @@ pub enum IROperand {
     Proto(String),
     // for constants, when emitting bytecode,
     // the values should be put into constant pool
+    // Immediate values should only be used in LoadImm instruction
     ImmFloat(f64),  // immediate float value
     ImmBool(bool),  // immediate boolean value
     ImmStr(String), // immediate string value
@@ -131,6 +133,12 @@ impl IRUnOp {
 
 #[derive(Debug, Clone)]
 pub enum IRInstruction {
+    // %dest = LoadImm $value
+    // load an immediate value into %dest
+    LoadImm {
+        dest: usize,
+        value: IROperand,
+    },
     // %dest = op %src1, %src2
     // for binary operations
     // calculate the result of src1 op src2 and store in dest
@@ -217,6 +225,9 @@ pub enum IRInstruction {
 impl IRInstruction {
     pub fn to_string(&self) -> String {
         match self {
+            IRInstruction::LoadImm { dest, value } => {
+                format!("%{} = LoadImm {}", dest, value.to_string())
+            }
             IRInstruction::Binary {
                 dest,
                 src1,
@@ -360,7 +371,7 @@ impl IRBasicBlock {
         } else {
             format!("{}\n", instrs_str)
         };
-        format!("_Tag{}:\n{}{}", self.id, instrs_str, term_str)
+        format!("_Tag{}:\n{}{}\n", self.id, instrs_str, term_str)
     }
 }
 
@@ -749,6 +760,25 @@ impl IRGenerator {
         IROperand::Reg(dest_reg)
     }
 
+    fn generate_simple_literal(&mut self, lit: &parser::ast::Literal) -> IROperand {
+        let imm_val = match lit {
+            parser::ast::Literal::Number(n) => IROperand::ImmFloat(*n),
+            parser::ast::Literal::String(s) => IROperand::ImmStr(s.clone()),
+            parser::ast::Literal::Boolean(b) => IROperand::ImmBool(*b),
+            parser::ast::Literal::Nil => IROperand::Nil,
+            _ => {
+                panic!("Not a simple literal");
+            }
+        };
+
+        let dest_reg = self.alloc_reg();
+        self.emit(IRInstruction::LoadImm {
+            dest: dest_reg,
+            value: imm_val,
+        });
+        IROperand::Reg(dest_reg)
+    }
+
     fn generate_expr(&mut self, expr: &parser::ast::Expression) -> IROperand {
         match expr {
             parser::ast::Expression::Identifier(name) => {
@@ -791,10 +821,12 @@ impl IRGenerator {
                 };
             }
             parser::ast::Expression::Literal(lit) => match lit {
-                parser::ast::Literal::Number(n) => return IROperand::ImmFloat(*n),
-                parser::ast::Literal::String(s) => return IROperand::ImmStr(s.clone()),
-                parser::ast::Literal::Boolean(b) => return IROperand::ImmBool(*b),
-                parser::ast::Literal::Nil => return IROperand::Nil,
+                parser::ast::Literal::Number(_)
+                | parser::ast::Literal::String(_)
+                | parser::ast::Literal::Boolean(_)
+                | parser::ast::Literal::Nil => {
+                    return self.generate_simple_literal(lit);
+                }
                 parser::ast::Literal::Function { name, params, body } => {
                     // function literal
                     // this generates a function prototype and returns the function reference
