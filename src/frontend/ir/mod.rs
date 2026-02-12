@@ -12,6 +12,7 @@
 //                to better reflect its purpose
 //                Provided details about local vars in function prototype
 //     26-02-12: Added LoadImm instruction for loading immediate values
+//     26-02-12: Added Drop instruction for discarding values that are not needed
 
 use std::collections::{HashMap, HashSet};
 
@@ -62,7 +63,7 @@ pub enum IROperand {
     // virtual register
     Reg(usize),
     // Local variable slot, used for AddrLocal instruction,
-    // DOES NOT use this directly as an operand in any other instructions
+    // DO NOT use this directly as an operand in any other instructions
     Slot(IRLocalVarSlot),
     // function prototype name
     // you can think of it as a function type
@@ -158,30 +159,33 @@ pub enum IRInstruction {
         operator: IRUnOp,
         src: IROperand,
     },
-    // %dest = AllocLocal $slot_id
-    // allocate/use an existing local variable and return its address,
-    // address stored to %dest
-    // when generating bytecode, this should be mapped to a stack slot
-    // or similar stuff
+    // %dest = AddrLocal %local_slot
+    // get the address of a local variable by its slot number, store in %dest
+    // this is used when address of a local variable is needed,
+    // such as in StoreLocal and LoadLocal instructions
     //
-    // see: IRFunction::local_variables for mapping
+    // see: IRFunction::local_variables for mapping information
+    //      of local variable names to slot numbers
     AddrLocal {
         dest: usize,
         slot: IROperand,
     },
-    // %dest = LoadLocal %src
-    // load the value of local variable at slot %src into %dest
+    // %dest = LoadLocal (%src)
+    // load the value of local variable at *address* %src into %dest
     // %src is the *ADDRESS* of the local variable, *not* the slot number,
     // so to use this, you need to AddrLocal first!!
     LoadLocal {
         dest: usize,
         src: IROperand,
     },
-    // StoreLocal %dst, %src
-    // store the value of %src into local variable at address %dst
+    // StoreLocal (%dst), %src
+    // store the value of %src into local variable at *address* %dst
+    // returns the value stored, which is useful for chained assignments like a = b = c
+    //
     // %dst is the *ADDRESS* of the local variable, *NOT* the slot number,
     // so to use this, you need to AddrLocal first, like in LoadLocal
     StoreLocal {
+        dest: usize,
         dst: usize,
         src: IROperand,
     },
@@ -193,8 +197,21 @@ pub enum IRInstruction {
     },
     // StoreGlobal "name" %src
     // store the value of %src into global variable "name"
+    // returns the value stored, same as StoreLocal, for chained assignment support
     StoreGlobal {
+        dest: usize,
         name: String,
+        src: IROperand,
+    },
+    // %nil = Drop %src
+    // drop the value in register %src, used for discarding values that are not needed
+    // for example, the return value of a function call that is not used,
+    // or the value of an expression statement
+    // %nil is used as a dummy destination
+    //
+    // for reg-based bytecode, this can be interpreted as an nop,
+    // but for stack-based bytecode, this can be used to pop the value from the stack
+    Drop {
         src: IROperand,
     },
     // %dest = Call %callee, [args]
@@ -255,14 +272,17 @@ impl IRInstruction {
             IRInstruction::LoadLocal { dest, src } => {
                 format!("%{} = LoadLocal ({})", dest, src.to_string())
             }
-            IRInstruction::StoreLocal { dst, src } => {
-                format!("StoreLocal (%{}) {}", dst, src.to_string())
+            IRInstruction::StoreLocal { dest, dst, src } => {
+                format!("%{} = StoreLocal (%{}) {}", dest, dst, src.to_string())
             }
             IRInstruction::LoadGlobal { dest, name } => {
                 format!("%{} = LoadGlobal \"{}\"", dest, name)
             }
-            IRInstruction::StoreGlobal { name, src } => {
-                format!("StoreGlobal \"{}\" {}", name, src.to_string())
+            IRInstruction::StoreGlobal { dest, name, src } => {
+                format!("%{} = StoreGlobal \"{}\" {}", dest, name, src.to_string())
+            }
+            IRInstruction::Drop { src } => {
+                format!("%nil = Drop {}", src.to_string())
             }
             IRInstruction::Call { dest, callee, args } => {
                 let args_str = args
@@ -384,10 +404,9 @@ struct IRActiveBlock {
 // a function prototype, which is a template for function instances
 // it contains the function name, parameters and body (basic blocks)
 //
-// as for the calling convention, the parameters are represented as virtual registers,
-// so if a function has n parameters, the prototype should expect
-// virtual registers %0 to %(n-1) as parameters
-// another calling convention design is that,
+// as for the calling convention, the parameters are represented as the
+// first N local variables of the function, where N is the number of parameters
+// so if the function has 3 parameters, then the local variable slots 0, 1, 2 are used for the parameters
 // if no return value is specified, the function will return a unit value
 // you can handle this either by generating an nil or a unit value
 // but there's no unit value in Lua spec, which is f*cking stupid
@@ -408,17 +427,21 @@ pub struct IRFunction {
 
 impl IRFunction {
     pub fn to_string(&self) -> String {
-        let mut local_vars_str = self
-            .local_variables
-            .iter()
-            .map(|(name, slot)| (slot, format!(";  %local_{} = {}", slot, name)))
-            .collect::<Vec<_>>();
-        local_vars_str.sort_by_key(|(slot, _)| *slot);
-        let local_vars_str = local_vars_str
-            .iter()
-            .map(|(_, s)| s.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let local_vars_str = if self.local_variables.is_empty() {
+            "; <no local variables>".to_string()
+        } else {
+            let mut vars = self
+                .local_variables
+                .iter()
+                .map(|(name, slot)| (slot, format!("; %local_{} = {}", slot, name)))
+                .collect::<Vec<_>>();
+            vars.sort_by_key(|(slot, _)| *slot);
+            vars.iter()
+                .map(|(_, s)| s.clone())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
         let bbs_str = self
             .basic_blocks
             .iter()
@@ -429,7 +452,7 @@ impl IRFunction {
             .params
             .iter()
             .zip(0..)
-            .map(|(p, i)| format!("param {}: %{}", p, i))
+            .map(|(p, i)| format!("param {}: %local_{}", p, i))
             .collect::<Vec<_>>();
         let param_str = if params.is_empty() {
             "void"
@@ -668,20 +691,25 @@ impl IRGenerator {
                         });
 
                         // store the value into the local variable
+                        // assign the value to a new register and return it
+                        let dest_reg = self.alloc_reg();
                         self.emit(IRInstruction::StoreLocal {
+                            dest: dest_reg,
                             dst: addr_reg,
                             src: src.clone(),
                         });
-                        return src;
+                        return IROperand::Reg(dest_reg);
                     }
                     Some(IRValueScope::Global) | None => {
                         // global variable
                         // if the variable is not declared, then also default to global
+                        let dest_reg = self.alloc_reg();
                         self.emit(IRInstruction::StoreGlobal {
+                            dest: dest_reg,
                             name: name.clone(),
                             src: src.clone(),
                         });
-                        return src;
+                        return IROperand::Reg(dest_reg);
                     }
                     _ => {
                         self.emit_err(IRGeneratorError::UndefinedVariable(name.clone()));
@@ -1041,7 +1069,9 @@ impl IRGenerator {
     fn generate_stmt(&mut self, stmt: &parser::ast::Statement) {
         match stmt {
             parser::ast::Statement::ExprStatement(expr) => {
-                self.generate_expr(expr);
+                let reg = self.generate_expr(expr);
+                // drop the result of the expression statement, since not used
+                self.emit(IRInstruction::Drop { src: reg });
             }
             parser::ast::Statement::Declaration { names, values } => {
                 for (name, value) in names.iter().zip(values.iter()) {
@@ -1070,9 +1100,17 @@ impl IRGenerator {
                         slot: IROperand::Slot(slot),
                     });
 
+                    let dest_reg = self.alloc_reg();
                     self.emit(IRInstruction::StoreLocal {
+                        dest: dest_reg,
                         dst: addr_reg,
                         src: src.clone(),
+                    });
+
+                    // StoreLocal returns the value stored, but we don't need it for declaration
+                    // drop it
+                    self.emit(IRInstruction::Drop {
+                        src: IROperand::Reg(dest_reg),
                     });
                 }
             }
