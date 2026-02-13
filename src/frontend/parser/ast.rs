@@ -57,6 +57,12 @@ pub enum Expression {
         collection: Box<Expression>,
         index: Box<Expression>,
     },
+    TableCtor {
+        // {key: value, ...} - table
+        // {value, value, ...} - arraylike, with implicit keys 1, 2, 3, ...
+        // {key: value, value, ...} - mixed
+        fields: Vec<(Option<Expression>, Expression)>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -3,6 +3,7 @@
 //
 // Changelog:
 //      26-02-10: Initial version
+//      26-02-13: Added '@' operator for legacy table ctor
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -41,6 +42,7 @@ pub enum Token {
     Dot,
     Semicolon,
     Colon,
+    At,
 
     KwAnd,
     KwOr,

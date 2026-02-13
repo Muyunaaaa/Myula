@@ -3,6 +3,7 @@
 //
 // Changelog:
 //      26-02-10: Initial version
+//      26-02-13: Added '@' operator for legacy table ctor
 
 pub mod token;
 
@@ -248,6 +249,7 @@ impl Lexer<'_> {
                         ',' => Token::Comma,
                         ';' => Token::Semicolon,
                         ':' => Token::Colon,
+                        '@' => Token::At,
                         other => {
                             self.emit_err(LexerError::UnexpectedCharacter(other));
                             Token::Errno

@@ -208,6 +208,101 @@ impl Parser<'_> {
         })
     }
 
+    fn parse_table_ctor(&mut self, is_legacy: bool) -> Option<ast::Expression> {
+        // Lua 1.1 legacy table constructor with '@' operator
+        if is_legacy {
+            self.expect(Token::At);
+        }
+
+        self.expect(Token::LBrace);
+        let mut fields: Vec<(Option<ast::Expression>, ast::Expression)> = vec![];
+        if self.peek_token() != &Token::RBrace {
+            loop {
+                let key_expr: Option<ast::Expression>;
+                let value_expr: ast::Expression;
+
+                // check if it's a key-value pair or just a value
+                if self.peek_token() == &Token::LBracket {
+                    // modern lua
+                    // key-value pair with expression key
+                    // {[ 1 + 1 ] = value, ...}
+                    self.advance_tokens(); // consume '['
+                    let key = self.parse_expression();
+                    if key.is_none() {
+                        self.emit_err(
+                            ParserErrorType::InvalidExpression,
+                            "Table constructor key requires a valid expression".to_string(),
+                        );
+                        return None;
+                    }
+                    key_expr = Some(key.unwrap());
+                    if !self.expect(Token::RBracket) {
+                        self.emit_err(
+                            ParserErrorType::UnclosedBrackets,
+                            "Expected ']' after table constructor key".to_string(),
+                        );
+                        return None;
+                    }
+                    if !self.expect(Token::Assign) {
+                        self.emit_err(
+                            ParserErrorType::UnexpectedToken,
+                            "Expected '=' after table constructor key".to_string(),
+                        );
+                        return None;
+                    }
+                } else if let Token::Ident(_) = self.peek_token() {
+                    // key-value pair with identifier key
+                    // { key = value, ... }
+                    let key = match self.peek_token().clone() {
+                        Token::Ident(name) => {
+                            self.advance_tokens();
+                            name
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    // for this style of key, we convert it to string literal
+                    key_expr = Some(ast::Expression::Literal(ast::Literal::String(key)));
+
+                    if !self.expect(Token::Assign) {
+                        self.emit_err(
+                            ParserErrorType::UnexpectedToken,
+                            "Expected '=' after table constructor key".to_string(),
+                        );
+                        return None;
+                    }
+                } else {
+                    // just a value
+                    // arraylike
+                    // { value, value, ... }
+                    key_expr = None;
+                }
+
+                let value = self.parse_expression();
+                if value.is_none() {
+                    self.emit_err(
+                        ParserErrorType::InvalidExpression,
+                        "Table constructor value requires a valid expression".to_string(),
+                    );
+                    return None;
+                }
+                value_expr = value.unwrap();
+
+                fields.push((key_expr, value_expr));
+
+                if self.peek_token() == &Token::Comma {
+                    self.advance_tokens(); // consume ','
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        self.expect(Token::RBrace);
+        Some(ast::Expression::TableCtor { fields })
+    }
+
     fn parse_unary_or_primary_expression(&mut self) -> Option<ast::Expression> {
         let token = self.peek_token().clone();
         let simple = match token {
@@ -278,6 +373,14 @@ impl Parser<'_> {
                 // function literal
                 let func_lit = self.parse_function_decl_expression()?;
                 Some(func_lit)
+            }
+
+            // table constructor
+            // '{' or '@' for legacy
+            Token::LBrace | Token::At => {
+                let is_legacy = token == Token::At;
+                let table_ctor = self.parse_table_ctor(is_legacy)?;
+                Some(table_ctor)
             }
 
             _ => {

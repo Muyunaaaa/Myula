@@ -11,10 +11,11 @@
 //                AddrLocal instruction renamed from AllocLocal
 //                to better reflect its purpose
 //                Provided details about local vars in function prototype
-//     26-02-12: Added LoadImm instruction for loading immediate values
-//     26-02-12: Added Drop instruction for discarding values that are not needed
-//     26-02-12: Now *Global instructions require a register to hold the var name,
-//               instead of directly using the name as an operand,
+//      26-02-12: Added LoadImm instruction for loading immediate values
+//      26-02-12: Added Drop instruction for discarding values that are not needed
+//      26-02-12: Now *Global instructions require a register to hold the var name,
+//                instead of directly using the name as an operand,
+//      26-02-13: Added TableCtor expression support in IR generation
 
 use std::collections::{HashMap, HashSet};
 
@@ -231,6 +232,36 @@ pub enum IRInstruction {
         collection: IROperand,
         index: IROperand,
     },
+    // %dest = NewTable %size_array, %size_hash
+    // Create a new table with preallocated sizes
+    // store the table reference into %dest
+    // However the preallocation behavior is implementation-defined,
+    // so it just serves as a hint for optimization
+    //
+    // size_array: expected number of array-like elements, if applicable
+    // size_hash:  expected number of key-value pairs, if applicable
+    // this can be mixed, so a table can contain both array-like and hash-like elements
+    NewTable {
+        dest: usize,
+        size_array: IROperand,
+        size_hash: IROperand,
+    },
+    // %dest = SetTable %table, %key, %value
+    // Set the key-value pair in the table
+    // This instruction returns the value set, for chained assignments
+    SetTable {
+        dest: usize,
+        table: IROperand,
+        key: IROperand,
+        value: IROperand,
+    },
+    // %dest = GetTable %table, %key
+    // Get the value from the table at the given key
+    GetTable {
+        dest: usize,
+        table: IROperand,
+        key: IROperand,
+    },
     // %dest = FnProto @func_name
     // Instantiate a function prototype @func_name,
     // store the function reference into %dest
@@ -281,7 +312,12 @@ impl IRInstruction {
                 format!("%{} = LoadGlobal {}", dest, name.to_string())
             }
             IRInstruction::StoreGlobal { dest, name, src } => {
-                format!("%{} = StoreGlobal {} {}", dest, name.to_string(), src.to_string())
+                format!(
+                    "%{} = StoreGlobal {} {}",
+                    dest,
+                    name.to_string(),
+                    src.to_string()
+                )
             }
             IRInstruction::Drop { src } => {
                 format!("%nil = Drop {}", src.to_string())
@@ -304,6 +340,40 @@ impl IRInstruction {
                     dest,
                     collection.to_string(),
                     index.to_string()
+                )
+            }
+            IRInstruction::NewTable {
+                dest,
+                size_array,
+                size_hash,
+            } => {
+                format!(
+                    "%{} = NewTable {}, {}",
+                    dest,
+                    size_array.to_string(),
+                    size_hash.to_string()
+                )
+            }
+            IRInstruction::SetTable {
+                dest,
+                table,
+                key,
+                value,
+            } => {
+                format!(
+                    "%{} = SetTable {}, {}, {}",
+                    dest,
+                    table.to_string(),
+                    key.to_string(),
+                    value.to_string()
+                )
+            }
+            IRInstruction::GetTable { dest, table, key } => {
+                format!(
+                    "%{} = GetTable {}, {}",
+                    dest,
+                    table.to_string(),
+                    key.to_string()
                 )
             }
             IRInstruction::FnProto {
@@ -816,6 +886,98 @@ impl IRGenerator {
         IROperand::Reg(dest_reg)
     }
 
+    fn generate_table_ctor_expr(
+        &mut self,
+        fields: &Vec<(Option<parser::ast::Expression>, parser::ast::Expression)>,
+    ) -> IROperand {
+        let tbl_reg = self.alloc_reg();
+        // make table prototype
+
+        // make sizes
+        let (asize, hsize) = {
+            // count array-like and hash-like fields
+            let (asize, hsize) = fields.iter().fold((0, 0), |(a, h), (key_opt, _)| {
+                if key_opt.is_none() {
+                    (a + 1, h)
+                } else {
+                    (a, h + 1)
+                }
+            });
+            let asize_op = IROperand::ImmFloat(asize as f64);
+            let hsize_op = IROperand::ImmFloat(hsize as f64);
+
+            let asize_reg = self.alloc_reg();
+            self.emit(IRInstruction::LoadImm {
+                dest: asize_reg,
+                value: asize_op,
+            });
+
+            let hsize_reg = self.alloc_reg();
+            self.emit(IRInstruction::LoadImm {
+                dest: hsize_reg,
+                value: hsize_op,
+            });
+
+            (IROperand::Reg(asize_reg), IROperand::Reg(hsize_reg))
+        };
+
+        self.emit(IRInstruction::NewTable {
+            dest: tbl_reg,
+            size_array: asize,
+            size_hash: hsize,
+        });
+
+        let tbl_reg = IROperand::Reg(tbl_reg);
+
+        // set fields
+        // lua tables are 1-indexed!!!
+        let mut idx = 1;
+
+        let processed_kvpairs = fields
+            .iter()
+            .map(|(key_opt, value_expr)| {
+                let key_op = if let Some(key_expr) = key_opt {
+                    // hash-like, use provided key
+                    // two cases: { [expr] = y, ... } or { x = y, ... }
+                    // for the latter, key_expr is preprocessed into a string literal expression
+                    // so we can just generate the expression directly
+                    //
+                    // see: Parser::parse_table_ctor for details
+                    idx += 1;
+                    self.generate_expr(key_expr)
+                } else {
+                    // array-like, use next index
+                    let key_reg = self.alloc_reg();
+                    let key_op = IROperand::ImmFloat(idx as f64);
+                    self.emit(IRInstruction::LoadImm {
+                        dest: key_reg,
+                        value: key_op,
+                    });
+                    idx += 1;
+                    IROperand::Reg(key_reg)
+                };
+
+                let value_op = self.generate_expr(value_expr);
+
+                (key_op, value_op)
+            })
+            .collect::<Vec<_>>();
+
+        // emit SetTable instructions
+        // fill in the table
+        for (key_op, value_op) in processed_kvpairs {
+            let dest_reg = self.alloc_reg();
+            self.emit(IRInstruction::SetTable {
+                dest: dest_reg,
+                table: tbl_reg.clone(),
+                key: key_op,
+                value: value_op,
+            });
+        }
+
+        tbl_reg
+    }
+
     fn generate_expr(&mut self, expr: &parser::ast::Expression) -> IROperand {
         match expr {
             parser::ast::Expression::Identifier(name) => {
@@ -892,11 +1054,9 @@ impl IRGenerator {
                 left,
                 operator,
                 right,
-            } => {
-                return self.generate_binary_expr(operator, left, right);
-            }
+            } => self.generate_binary_expr(operator, left, right),
             parser::ast::Expression::UnOp { operator, operand } => {
-                return self.generate_unary_expr(operator, operand);
+                self.generate_unary_expr(operator, operand)
             }
             parser::ast::Expression::FnCall { callee, arguments } => {
                 // any fn
@@ -915,7 +1075,7 @@ impl IRGenerator {
                     args: arg_regs,
                 });
 
-                return IROperand::Reg(dest_reg);
+                IROperand::Reg(dest_reg)
             }
             parser::ast::Expression::IndexOf { collection, index } => {
                 // collection and index
@@ -928,8 +1088,9 @@ impl IRGenerator {
                     collection: collection_reg,
                     index: index_reg,
                 });
-                return IROperand::Reg(dest_reg);
+                IROperand::Reg(dest_reg)
             }
+            parser::ast::Expression::TableCtor { fields } => self.generate_table_ctor_expr(fields),
         }
     }
 
