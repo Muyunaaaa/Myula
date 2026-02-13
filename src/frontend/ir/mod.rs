@@ -16,6 +16,7 @@
 //      26-02-12: Now *Global instructions require a register to hold the var name,
 //                instead of directly using the name as an operand,
 //      26-02-13: Added TableCtor expression support in IR generation
+//      26-02-13: Added member access support in IR generation
 
 use std::collections::{HashMap, HashSet};
 
@@ -1090,9 +1091,9 @@ impl IRGenerator {
         // lua tables are 1-indexed!!!
         let mut idx = 1;
 
-        let processed_kvpairs = fields
+        fields
             .iter()
-            .map(|(key_opt, value_expr)| {
+            .for_each(|(key_opt, value_expr)| {
                 let key_op = if let Some(key_expr) = key_opt {
                     // hash-like, use provided key
                     // two cases: { [expr] = y, ... } or { x = y, ... }
@@ -1116,21 +1117,17 @@ impl IRGenerator {
 
                 let value_op = self.generate_expr(value_expr);
 
-                (key_op, value_op)
-            })
-            .collect::<Vec<_>>();
-
-        // emit SetTable instructions
-        // fill in the table
-        for (key_op, value_op) in processed_kvpairs {
-            let dest_reg = self.alloc_reg();
-            self.emit(IRInstruction::SetTable {
-                dest: dest_reg,
-                table: tbl_reg.clone(),
-                key: key_op,
-                value: value_op,
+                // set the key-value pair in the table
+                // do not seperate this op out of here,
+                // that is unfriendly for stack-based bytecode
+                let dest_reg = self.alloc_reg();
+                self.emit(IRInstruction::SetTable {
+                    dest: dest_reg,
+                    table: tbl_reg.clone(),
+                    key: key_op,
+                    value: value_op,
+                });
             });
-        }
 
         tbl_reg
     }
