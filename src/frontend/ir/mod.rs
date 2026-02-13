@@ -59,6 +59,7 @@ pub struct IRGlobalScope {
 #[derive(Debug, Clone)]
 pub enum IRGeneratorError {
     UndefinedVariable(String),
+    InvalidLValue,
 }
 
 #[derive(Debug, Clone)]
@@ -227,10 +228,44 @@ pub enum IRInstruction {
     },
     // %dest = IndexOf %collection, %index
     // Get the element at %index from %collection,
+    // This is basically a fast path for table member access,
+    // i.e. GetTable with a constant key
+    // but whether to implement this instruction is optional,
+    // backend can choose to lower this to GetTable
     IndexOf {
         dest: usize,
         collection: IROperand,
         index: IROperand,
+    },
+    // %dest = SetIndex %collection, %index, %value
+    // Set the element at %index in %collection to %value,
+    // a fast path for table member assignment, similar to IndexOf
+    SetIndex {
+        dest: usize,
+        collection: IROperand,
+        index: IROperand,
+        value: IROperand,
+    },
+    // %dest = MemberOf %collection, %member
+    // Get the member %member from %collection,
+    // %member is guaranteed to be a string literal, 
+    // so this is also a fast path for table member access,
+    // you can precompute the hash of the member name and use it as a key in GetTable,
+    // but again, whether to implement this instruction is optional
+    MemberOf {
+        dest: usize,
+        collection: IROperand,
+        member: IROperand,
+    },
+    // %dest = SetMember %collection, %member, %value
+    // Set the member %member in %collection to %value,
+    // similar to MemberOf, this is a fast path for table member assignment
+    // %member is guaranteed to be a string literal, same as in MemberOf
+    SetMember {
+        dest: usize,
+        collection: IROperand,
+        member: IROperand,
+        value: IROperand,
     },
     // %dest = NewTable %size_array, %size_hash
     // Create a new table with preallocated sizes
@@ -257,6 +292,7 @@ pub enum IRInstruction {
     },
     // %dest = GetTable %table, %key
     // Get the value from the table at the given key
+    // This is the most general form of table access, which can handle any type of key,
     GetTable {
         dest: usize,
         table: IROperand,
@@ -340,6 +376,46 @@ impl IRInstruction {
                     dest,
                     collection.to_string(),
                     index.to_string()
+                )
+            }
+            IRInstruction::SetIndex {
+                dest,
+                collection,
+                index,
+                value,
+            } => {
+                format!(
+                    "%{} = SetIndex {}, {}, {}",
+                    dest,
+                    collection.to_string(),
+                    index.to_string(),
+                    value.to_string()
+                )
+            }
+            IRInstruction::MemberOf {
+                dest,
+                collection,
+                member,
+            } => {
+                format!(
+                    "%{} = MemberOf {}, {}",
+                    dest,
+                    collection.to_string(),
+                    member.to_string()
+                )
+            }
+            IRInstruction::SetMember {
+                dest,
+                collection,
+                member,
+                value,
+            } => {
+                format!(
+                    "%{} = SetMember {}, {}, {}",
+                    dest,
+                    collection.to_string(),
+                    member.to_string(),
+                    value.to_string()
                 )
             }
             IRInstruction::NewTable {
@@ -796,8 +872,89 @@ impl IRGenerator {
                     }
                 };
             }
+            // non-trivial lvalue, like table member access or indexing
+            parser::ast::Expression::MemberAccess { collection, member } => {
+                // generate code for table member assignment
+                // here for x.y.z.w, we unwrap it to (x.y.z) and w, 
+                // and generate code for getting the table reference of x.y.z first, 
+                // then set the member w in that table
+                let collection_reg = self.generate_expr(collection);
+
+                let key_reg = self.alloc_reg();
+                self.emit(IRInstruction::LoadImm {
+                    dest: key_reg,
+                    value: IROperand::ImmStr(member.clone()),
+                });
+
+                let dest_reg = self.alloc_reg();
+                self.emit(IRInstruction::SetMember {
+                    dest: dest_reg,
+                    collection: collection_reg,
+                    member: IROperand::Reg(key_reg),
+                    value: src.clone(),
+                });
+                return IROperand::Reg(dest_reg);
+            }
+            parser::ast::Expression::IndexOf { 
+                collection, index 
+            } => {
+                // collection and index
+                // this is similar to that in generate_expr,
+                // but we need setter instructions instead of getter instructions
+                let collection_reg = self.generate_expr(collection);
+
+                match &**index {
+                    parser::ast::Expression::Literal(parser::ast::Literal::String(s)) => {
+                        // string literal key
+                        let key_reg = self.alloc_reg();
+                        self.emit(IRInstruction::LoadImm {
+                            dest: key_reg,
+                            value: IROperand::ImmStr(s.clone()),
+                        });
+
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::SetMember {
+                            dest: dest_reg,
+                            collection: collection_reg,
+                            member: IROperand::Reg(key_reg),
+                            value: src.clone(),
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                    parser::ast::Expression::Literal(parser::ast::Literal::Number(n)) => {
+                        // numeric index
+                        let key_reg = self.alloc_reg();
+                        self.emit(IRInstruction::LoadImm {
+                            dest: key_reg,
+                            value: IROperand::ImmFloat(*n),
+                        });
+
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::SetIndex {
+                            dest: dest_reg,
+                            collection: collection_reg,
+                            index: IROperand::Reg(key_reg),
+                            value: src.clone(),
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                    _ => {
+                        // general case
+                        let key_reg = self.generate_expr(index);
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::SetTable {
+                            dest: dest_reg,
+                            table: collection_reg,
+                            key: key_reg,
+                            value: src.clone(),
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                }
+            }
             _ => {
-                unimplemented!("Assignment to non-identifier left value");
+                self.emit_err(IRGeneratorError::InvalidLValue);
+                src
             }
         }
     }
@@ -1077,20 +1234,74 @@ impl IRGenerator {
 
                 IROperand::Reg(dest_reg)
             }
-            parser::ast::Expression::IndexOf { collection, index } => {
+            parser::ast::Expression::IndexOf { 
+                collection, index 
+            } => {
                 // collection and index
+                // this has few types of possibilites:
+                // 1. common table access like t[k], where collection is a table and index is any expression
+                // 2. table access with string literal key
+                // 3. table access with numeric index, which is basically array access
                 let collection_reg = self.generate_expr(collection);
                 let index_reg = self.generate_expr(index);
 
+                match **index {
+                    parser::ast::Expression::Literal(parser::ast::Literal::String(_)) => {
+                        // string literal key, can use MemberOf instruction
+                        // if backend implements MemberOf, it can prehash the member name 
+                        // and optimize the access
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::MemberOf {
+                            dest: dest_reg,
+                            collection: collection_reg,
+                            member: index_reg,
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                    parser::ast::Expression::Literal(parser::ast::Literal::Number(_)) => {
+                        // numeric index, can use IndexOf instruction
+                        // if backend implements IndexOf, this can be optimized as array access
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::IndexOf {
+                            dest: dest_reg,
+                            collection: collection_reg,
+                            index: index_reg,
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                    _ => {
+                        // general case, use GetTable instruction
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::GetTable {
+                            dest: dest_reg,
+                            table: collection_reg,
+                            key: index_reg,
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                }
+            }
+            parser::ast::Expression::MemberAccess { collection, member } => {
+                // normal member access like t.x, which is syntactic sugar for t["x"]
+                let collection_reg = self.generate_expr(collection);
+
+                let member_reg = self.alloc_reg();
+                self.emit(IRInstruction::LoadImm {
+                    dest: member_reg,
+                    value: IROperand::ImmStr(member.clone()),
+                });
+
                 let dest_reg = self.alloc_reg();
-                self.emit(IRInstruction::IndexOf {
+                self.emit(IRInstruction::MemberOf {
                     dest: dest_reg,
                     collection: collection_reg,
-                    index: index_reg,
+                    member: IROperand::Reg(member_reg),
                 });
                 IROperand::Reg(dest_reg)
             }
-            parser::ast::Expression::TableCtor { fields } => self.generate_table_ctor_expr(fields),
+            parser::ast::Expression::TableCtor { 
+                fields
+            } => self.generate_table_ctor_expr(fields),
         }
     }
 

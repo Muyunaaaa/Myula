@@ -4,6 +4,7 @@
 // Changelog:
 //      26-02-10: Initial version
 //      26-02-11: Added more AST node types
+//      26-02-13: Table ctors, member access
 
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -56,6 +57,10 @@ pub enum Expression {
     IndexOf {
         collection: Box<Expression>,
         index: Box<Expression>,
+    },
+    MemberAccess {
+        collection: Box<Expression>,
+        member: String,
     },
     TableCtor {
         // {key: value, ...} - table
