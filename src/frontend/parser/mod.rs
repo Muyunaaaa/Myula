@@ -6,6 +6,7 @@
 //      26-02-11: Minor fixes
 //      26-02-11: Added function call and indexing parsing
 //      26-02-11: Added function declaration parsing
+//      26-02-13: Added table constructor parsing and member access parsing
 
 pub mod ast;
 
@@ -423,6 +424,28 @@ impl Parser<'_> {
                     } else {
                         return None;
                     }
+                }
+                Token::Dot => {
+                    // member access
+                    self.advance_tokens(); // consume '.'
+                    let member_name = match self.peek_token().clone() {
+                        Token::Ident(name) => {
+                            self.advance_tokens();
+                            name
+                        }
+                        _ => {
+                            let msg = format!(
+                                "Expected identifier after '.' for member access, found {:?}",
+                                self.peek_token()
+                            );
+                            self.emit_err(ParserErrorType::UnexpectedToken, msg);
+                            return None;
+                        }
+                    };
+                    simple = ast::Expression::MemberAccess {
+                        collection: Box::new(simple),
+                        member: member_name,
+                    };
                 }
                 _ => break,
             }
