@@ -1,31 +1,56 @@
-/*
-   这里主要定义Object
-*/
-use crate::common::hash;
-use std::cell::RefCell;
-use std::rc::Rc;
-pub type LuaHashRef = Rc<RefCell<hash::LuaHash>>;
+use std::collections::HashMap;
+use std::fmt;
+
 pub type CFunction = fn();
+pub struct HeaderOnly;
 
-// lua-value
-#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct GCObject<T> {
+    pub mark: bool,
+    pub next: *mut GCObject<HeaderOnly>,
+    pub data: T,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LuaValue {
-    MARK,
-    NIL,
-    NUMBER(f64),
-    STRING(Rc<String>),
-    BOOLEAN(bool),
-    ARRAY(LuaHashRef),
-    FUNCTION(Rc<Vec<u8>>),
-    CFUNCTION(CFunction),
-    USERDATA(*mut std::ffi::c_void),
+    Nil,
+    Number(f64),
+    Boolean(bool),
+    String(*mut GCObject<String>),
+    Table(*mut GCObject<HashMap<LuaValue, LuaValue>>),
+    Function(*mut GCObject<Vec<u8>>),
+    CFunc(CFunction),
+    UserData(*mut std::ffi::c_void),
+}
+#[derive(Debug, Clone, Copy)]
+pub struct LuaObject {
+    pub value: LuaValue,
 }
 
-//lua-symbol
+impl LuaObject {
+    pub fn new(value: LuaValue) -> Self {
+        Self { value }
+    }
+}
 #[derive(Debug, Clone)]
-struct LuaSymbol {
-    name: Rc<String>,
-    value: LuaValue,
+pub struct LuaSymbol {
+    pub name: *mut GCObject<String>,
+    pub value: LuaValue,
 }
 
-//语法糖
+impl fmt::Display for LuaValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LuaValue::Nil => write!(f, "nil"),
+            LuaValue::Number(n) => write!(f, "{}", n),
+            LuaValue::Boolean(b) => write!(f, "{}", b),
+            LuaValue::String(ptr) => unsafe {
+                write!(f, "{}", (*(*ptr)).data)
+            },
+            LuaValue::Table(ptr) => write!(f, "table: {:p}", ptr),
+            LuaValue::Function(ptr) => write!(f, "function: {:p}", ptr),
+            LuaValue::CFunc(_) => write!(f, "cfunction"),
+            LuaValue::UserData(ptr) => write!(f, "userdata: {:p}", ptr),
+        }
+    }
+}
