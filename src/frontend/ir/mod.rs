@@ -16,6 +16,9 @@
 //      26-02-12: Now *Global instructions require a register to hold the var name,
 //                instead of directly using the name as an operand,
 //      26-02-13: Added TableCtor expression support in IR generation
+//      26-02-13: Added member access support in IR generation
+//      26-02-14: Removed AddrLocal instruction, replaced with direct use of local variable slots
+//                in LoadLocal and StoreLocal, to simplify the IR and avoid unnecessary instructions
 
 use std::collections::{HashMap, HashSet};
 
@@ -59,6 +62,7 @@ pub struct IRGlobalScope {
 #[derive(Debug, Clone)]
 pub enum IRGeneratorError {
     UndefinedVariable(String),
+    InvalidLValue,
 }
 
 #[derive(Debug, Clone)]
@@ -162,34 +166,26 @@ pub enum IRInstruction {
         operator: IRUnOp,
         src: IROperand,
     },
-    // %dest = AddrLocal %local_slot
-    // get the address of a local variable by its slot number, store in %dest
-    // this is used when address of a local variable is needed,
-    // such as in StoreLocal and LoadLocal instructions
+    // %dest = LoadLocal %slot
+    // load the value of local variable at slot %slot into %dest
+    // %slot is guaranteed to be a IROperand::Slot
     //
     // see: IRFunction::local_variables for mapping information
     //      of local variable names to slot numbers
-    AddrLocal {
-        dest: usize,
-        slot: IROperand,
-    },
-    // %dest = LoadLocal (%src)
-    // load the value of local variable at *address* %src into %dest
-    // %src is the *ADDRESS* of the local variable, *not* the slot number,
-    // so to use this, you need to AddrLocal first!!
     LoadLocal {
         dest: usize,
         src: IROperand,
     },
-    // StoreLocal (%dst), %src
-    // store the value of %src into local variable at *address* %dst
+    // StoreLocal %slot, %src
+    // store the value of %src into local variable at slot %slot
     // returns the value stored, which is useful for chained assignments like a = b = c
+    // %slot is guaranteed to be a IROperand::Slot
     //
-    // %dst is the *ADDRESS* of the local variable, *NOT* the slot number,
-    // so to use this, you need to AddrLocal first, like in LoadLocal
+    // see: IRFunction::local_variables for mapping information
+    //      of local variable names to slot numbers
     StoreLocal {
         dest: usize,
-        dst: usize,
+        dst: IROperand,
         src: IROperand,
     },
     // %dest = LoadGlobal "name"
@@ -227,10 +223,44 @@ pub enum IRInstruction {
     },
     // %dest = IndexOf %collection, %index
     // Get the element at %index from %collection,
+    // This is basically a fast path for table member access,
+    // i.e. GetTable with a constant key
+    // but whether to implement this instruction is optional,
+    // backend can choose to lower this to GetTable
     IndexOf {
         dest: usize,
         collection: IROperand,
         index: IROperand,
+    },
+    // %dest = SetIndex %collection, %index, %value
+    // Set the element at %index in %collection to %value,
+    // a fast path for table member assignment, similar to IndexOf
+    SetIndex {
+        dest: usize,
+        collection: IROperand,
+        index: IROperand,
+        value: IROperand,
+    },
+    // %dest = MemberOf %collection, %member
+    // Get the member %member from %collection,
+    // %member is guaranteed to be a string literal,
+    // so this is also a fast path for table member access,
+    // you can precompute the hash of the member name and use it as a key in GetTable,
+    // but again, whether to implement this instruction is optional
+    MemberOf {
+        dest: usize,
+        collection: IROperand,
+        member: IROperand,
+    },
+    // %dest = SetMember %collection, %member, %value
+    // Set the member %member in %collection to %value,
+    // similar to MemberOf, this is a fast path for table member assignment
+    // %member is guaranteed to be a string literal, same as in MemberOf
+    SetMember {
+        dest: usize,
+        collection: IROperand,
+        member: IROperand,
+        value: IROperand,
     },
     // %dest = NewTable %size_array, %size_hash
     // Create a new table with preallocated sizes
@@ -241,6 +271,12 @@ pub enum IRInstruction {
     // size_array: expected number of array-like elements, if applicable
     // size_hash:  expected number of key-value pairs, if applicable
     // this can be mixed, so a table can contain both array-like and hash-like elements
+    //
+    // Something worth noticing for registers holding table references is that,
+    // the table it points to is mutable, while the register itself is immutable,
+    // which means that you can modify the contents of the table through that only register
+    // and this register can survive multiple instructions
+    // so you cannot simply discard the register after one use
     NewTable {
         dest: usize,
         size_array: IROperand,
@@ -257,6 +293,7 @@ pub enum IRInstruction {
     },
     // %dest = GetTable %table, %key
     // Get the value from the table at the given key
+    // This is the most general form of table access, which can handle any type of key,
     GetTable {
         dest: usize,
         table: IROperand,
@@ -299,14 +336,16 @@ impl IRInstruction {
             } => {
                 format!("%{} = {} {}", dest, operator.to_string(), src.to_string())
             }
-            IRInstruction::AddrLocal { dest, slot } => {
-                format!("%{} = AddrLocal {}", dest, slot.to_string())
-            }
             IRInstruction::LoadLocal { dest, src } => {
-                format!("%{} = LoadLocal ({})", dest, src.to_string())
+                format!("%{} = LoadLocal {}", dest, src.to_string())
             }
             IRInstruction::StoreLocal { dest, dst, src } => {
-                format!("%{} = StoreLocal (%{}) {}", dest, dst, src.to_string())
+                format!(
+                    "%{} = StoreLocal {} {}",
+                    dest,
+                    dst.to_string(),
+                    src.to_string()
+                )
             }
             IRInstruction::LoadGlobal { dest, name } => {
                 format!("%{} = LoadGlobal {}", dest, name.to_string())
@@ -340,6 +379,46 @@ impl IRInstruction {
                     dest,
                     collection.to_string(),
                     index.to_string()
+                )
+            }
+            IRInstruction::SetIndex {
+                dest,
+                collection,
+                index,
+                value,
+            } => {
+                format!(
+                    "%{} = SetIndex {}, {}, {}",
+                    dest,
+                    collection.to_string(),
+                    index.to_string(),
+                    value.to_string()
+                )
+            }
+            IRInstruction::MemberOf {
+                dest,
+                collection,
+                member,
+            } => {
+                format!(
+                    "%{} = MemberOf {}, {}",
+                    dest,
+                    collection.to_string(),
+                    member.to_string()
+                )
+            }
+            IRInstruction::SetMember {
+                dest,
+                collection,
+                member,
+                value,
+            } => {
+                format!(
+                    "%{} = SetMember {}, {}, {}",
+                    dest,
+                    collection.to_string(),
+                    member.to_string(),
+                    value.to_string()
                 )
             }
             IRInstruction::NewTable {
@@ -755,19 +834,12 @@ impl IRGenerator {
                         }
                         let slot = slot.unwrap();
 
-                        // get the address of the local variable by slot
-                        let addr_reg = self.alloc_reg();
-                        self.emit(IRInstruction::AddrLocal {
-                            dest: addr_reg,
-                            slot: IROperand::Slot(slot),
-                        });
-
                         // store the value into the local variable
                         // assign the value to a new register and return it
                         let dest_reg = self.alloc_reg();
                         self.emit(IRInstruction::StoreLocal {
                             dest: dest_reg,
-                            dst: addr_reg,
+                            dst: IROperand::Slot(slot),
                             src: src.clone(),
                         });
                         return IROperand::Reg(dest_reg);
@@ -796,8 +868,87 @@ impl IRGenerator {
                     }
                 };
             }
+            // non-trivial lvalue, like table member access or indexing
+            parser::ast::Expression::MemberAccess { collection, member } => {
+                // generate code for table member assignment
+                // here for x.y.z.w, we unwrap it to (x.y.z) and w,
+                // and generate code for getting the table reference of x.y.z first,
+                // then set the member w in that table
+                let collection_reg = self.generate_expr(collection);
+
+                let key_reg = self.alloc_reg();
+                self.emit(IRInstruction::LoadImm {
+                    dest: key_reg,
+                    value: IROperand::ImmStr(member.clone()),
+                });
+
+                let dest_reg = self.alloc_reg();
+                self.emit(IRInstruction::SetMember {
+                    dest: dest_reg,
+                    collection: collection_reg,
+                    member: IROperand::Reg(key_reg),
+                    value: src.clone(),
+                });
+                return IROperand::Reg(dest_reg);
+            }
+            parser::ast::Expression::IndexOf { collection, index } => {
+                // collection and index
+                // this is similar to that in generate_expr,
+                // but we need setter instructions instead of getter instructions
+                let collection_reg = self.generate_expr(collection);
+
+                match &**index {
+                    parser::ast::Expression::Literal(parser::ast::Literal::String(s)) => {
+                        // string literal key
+                        let key_reg = self.alloc_reg();
+                        self.emit(IRInstruction::LoadImm {
+                            dest: key_reg,
+                            value: IROperand::ImmStr(s.clone()),
+                        });
+
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::SetMember {
+                            dest: dest_reg,
+                            collection: collection_reg,
+                            member: IROperand::Reg(key_reg),
+                            value: src.clone(),
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                    parser::ast::Expression::Literal(parser::ast::Literal::Number(n)) => {
+                        // numeric index
+                        let key_reg = self.alloc_reg();
+                        self.emit(IRInstruction::LoadImm {
+                            dest: key_reg,
+                            value: IROperand::ImmFloat(*n),
+                        });
+
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::SetIndex {
+                            dest: dest_reg,
+                            collection: collection_reg,
+                            index: IROperand::Reg(key_reg),
+                            value: src.clone(),
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                    _ => {
+                        // general case
+                        let key_reg = self.generate_expr(index);
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::SetTable {
+                            dest: dest_reg,
+                            table: collection_reg,
+                            key: key_reg,
+                            value: src.clone(),
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                }
+            }
             _ => {
-                unimplemented!("Assignment to non-identifier left value");
+                self.emit_err(IRGeneratorError::InvalidLValue);
+                src
             }
         }
     }
@@ -890,7 +1041,6 @@ impl IRGenerator {
         &mut self,
         fields: &Vec<(Option<parser::ast::Expression>, parser::ast::Expression)>,
     ) -> IROperand {
-        let tbl_reg = self.alloc_reg();
         // make table prototype
 
         // make sizes
@@ -921,6 +1071,8 @@ impl IRGenerator {
             (IROperand::Reg(asize_reg), IROperand::Reg(hsize_reg))
         };
 
+        // create table register
+        let tbl_reg = self.alloc_reg();
         self.emit(IRInstruction::NewTable {
             dest: tbl_reg,
             size_array: asize,
@@ -933,39 +1085,33 @@ impl IRGenerator {
         // lua tables are 1-indexed!!!
         let mut idx = 1;
 
-        let processed_kvpairs = fields
-            .iter()
-            .map(|(key_opt, value_expr)| {
-                let key_op = if let Some(key_expr) = key_opt {
-                    // hash-like, use provided key
-                    // two cases: { [expr] = y, ... } or { x = y, ... }
-                    // for the latter, key_expr is preprocessed into a string literal expression
-                    // so we can just generate the expression directly
-                    //
-                    // see: Parser::parse_table_ctor for details
-                    idx += 1;
-                    self.generate_expr(key_expr)
-                } else {
-                    // array-like, use next index
-                    let key_reg = self.alloc_reg();
-                    let key_op = IROperand::ImmFloat(idx as f64);
-                    self.emit(IRInstruction::LoadImm {
-                        dest: key_reg,
-                        value: key_op,
-                    });
-                    idx += 1;
-                    IROperand::Reg(key_reg)
-                };
+        fields.iter().for_each(|(key_opt, value_expr)| {
+            let key_op = if let Some(key_expr) = key_opt {
+                // hash-like, use provided key
+                // two cases: { [expr] = y, ... } or { x = y, ... }
+                // for the latter, key_expr is preprocessed into a string literal expression
+                // so we can just generate the expression directly
+                //
+                // see: Parser::parse_table_ctor for details
+                idx += 1;
+                self.generate_expr(key_expr)
+            } else {
+                // array-like, use next index
+                let key_reg = self.alloc_reg();
+                let key_op = IROperand::ImmFloat(idx as f64);
+                self.emit(IRInstruction::LoadImm {
+                    dest: key_reg,
+                    value: key_op,
+                });
+                idx += 1;
+                IROperand::Reg(key_reg)
+            };
 
-                let value_op = self.generate_expr(value_expr);
+            let value_op = self.generate_expr(value_expr);
 
-                (key_op, value_op)
-            })
-            .collect::<Vec<_>>();
-
-        // emit SetTable instructions
-        // fill in the table
-        for (key_op, value_op) in processed_kvpairs {
+            // set the key-value pair in the table
+            // do not seperate this op out of here,
+            // that is unfriendly for stack-based bytecode
             let dest_reg = self.alloc_reg();
             self.emit(IRInstruction::SetTable {
                 dest: dest_reg,
@@ -973,7 +1119,7 @@ impl IRGenerator {
                 key: key_op,
                 value: value_op,
             });
-        }
+        });
 
         tbl_reg
     }
@@ -988,17 +1134,10 @@ impl IRGenerator {
                         // find the slot of the local variable
                         let slot = self.find_local(name).unwrap();
 
-                        // get the address of the local variable by slot
-                        let addr_reg = self.alloc_reg();
-                        self.emit(IRInstruction::AddrLocal {
-                            dest: addr_reg,
-                            slot: IROperand::Slot(slot),
-                        });
-
                         let dest_reg = self.alloc_reg();
                         self.emit(IRInstruction::LoadLocal {
                             dest: dest_reg,
-                            src: IROperand::Reg(addr_reg),
+                            src: IROperand::Slot(slot),
                         });
                         return IROperand::Reg(dest_reg);
                     }
@@ -1079,14 +1218,64 @@ impl IRGenerator {
             }
             parser::ast::Expression::IndexOf { collection, index } => {
                 // collection and index
+                // this has few types of possibilites:
+                // 1. common table access like t[k], where collection is a table and index is any expression
+                // 2. table access with string literal key
+                // 3. table access with numeric index, which is basically array access
                 let collection_reg = self.generate_expr(collection);
                 let index_reg = self.generate_expr(index);
 
+                match **index {
+                    parser::ast::Expression::Literal(parser::ast::Literal::String(_)) => {
+                        // string literal key, can use MemberOf instruction
+                        // if backend implements MemberOf, it can prehash the member name
+                        // and optimize the access
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::MemberOf {
+                            dest: dest_reg,
+                            collection: collection_reg,
+                            member: index_reg,
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                    parser::ast::Expression::Literal(parser::ast::Literal::Number(_)) => {
+                        // numeric index, can use IndexOf instruction
+                        // if backend implements IndexOf, this can be optimized as array access
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::IndexOf {
+                            dest: dest_reg,
+                            collection: collection_reg,
+                            index: index_reg,
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                    _ => {
+                        // general case, use GetTable instruction
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::GetTable {
+                            dest: dest_reg,
+                            table: collection_reg,
+                            key: index_reg,
+                        });
+                        IROperand::Reg(dest_reg)
+                    }
+                }
+            }
+            parser::ast::Expression::MemberAccess { collection, member } => {
+                // normal member access like t.x, which is syntactic sugar for t["x"]
+                let collection_reg = self.generate_expr(collection);
+
+                let member_reg = self.alloc_reg();
+                self.emit(IRInstruction::LoadImm {
+                    dest: member_reg,
+                    value: IROperand::ImmStr(member.clone()),
+                });
+
                 let dest_reg = self.alloc_reg();
-                self.emit(IRInstruction::IndexOf {
+                self.emit(IRInstruction::MemberOf {
                     dest: dest_reg,
                     collection: collection_reg,
-                    index: index_reg,
+                    member: IROperand::Reg(member_reg),
                 });
                 IROperand::Reg(dest_reg)
             }
@@ -1272,16 +1461,10 @@ impl IRGenerator {
                         self.decl_local(name.clone())
                     };
 
-                    let addr_reg = self.alloc_reg();
-                    self.emit(IRInstruction::AddrLocal {
-                        dest: addr_reg,
-                        slot: IROperand::Slot(slot),
-                    });
-
                     let dest_reg = self.alloc_reg();
                     self.emit(IRInstruction::StoreLocal {
                         dest: dest_reg,
-                        dst: addr_reg,
+                        dst: IROperand::Slot(slot),
                         src: src.clone(),
                     });
 

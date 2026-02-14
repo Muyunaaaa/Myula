@@ -43,7 +43,13 @@ mod tests {
         repeat
             x = x + 2
         until x >= 300
-        local tbl = {a = 1, b = 2, c = 3, 4, 5, 6}
+        local tbl = {a = 1, b = 2, c = 3, 4, 5, 6, [ 1 + 1 ] = 42}
+        tbl.hello = \"world\"
+        tbl[2] = 3
+        print(tbl[\"hello\"])
+        print(tbl.a)
+        print(tbl[\"b\"])
+        print(tbl[1])
         ",
         );
         let mut parser = Parser::new(&mut lexer);
