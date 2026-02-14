@@ -29,7 +29,7 @@ mod register_allocation_visualizer {
         ir_gen.generate(&program);
 
         let mut scanner = Scanner::new();
-        scanner.global_scan(&ir_gen);
+        scanner.global_scan(&ir_gen.get_module());
 
         print_detailed_report(&scanner);
     }

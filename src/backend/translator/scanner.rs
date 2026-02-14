@@ -42,8 +42,7 @@ impl Scanner {
         }
     }
 
-    pub fn global_scan(&mut self, generator: &IRGenerator) {
-        let module: &IRModule = generator.get_module();
+    pub fn global_scan(&mut self, module: &IRModule) {
         for func in &module.functions {
             self.instr_count = 0;
             self.scan_lifetimes(func);
