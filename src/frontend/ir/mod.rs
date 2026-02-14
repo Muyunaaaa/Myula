@@ -19,6 +19,7 @@
 //      26-02-13: Added member access support in IR generation
 //      26-02-14: Removed AddrLocal instruction, replaced with direct use of local variable slots
 //                in LoadLocal and StoreLocal, to simplify the IR and avoid unnecessary instructions
+//      26-02-14: Added mangling for local function names to avoid name conflicts
 
 use std::collections::{HashMap, HashSet};
 
@@ -28,7 +29,7 @@ pub struct IRGenerator {
     module: IRModule,
     function_contexts: Vec<IRFunctionContext>,
 
-    next_anonymous_func_id: usize,
+    next_func_id: usize,
 
     errors: Vec<IRGeneratorError>,
 
@@ -644,7 +645,7 @@ impl IRGenerator {
         return IRGenerator {
             module: IRModule { functions: vec![] },
             function_contexts: vec![],
-            next_anonymous_func_id: 0,
+            next_func_id: 0,
             errors: vec![],
             scope_stack: vec![],
         };
@@ -682,9 +683,18 @@ impl IRGenerator {
     }
 
     fn alloc_anonymous_func_name(&mut self) -> String {
-        let id = self.next_anonymous_func_id;
-        self.next_anonymous_func_id += 1;
+        // generate a unique name for anonymous function literals
+        let id = self.next_func_id;
+        self.next_func_id += 1;
         format!("__anon_fn_{}", id)
+    }
+
+    fn mangle_local_fn_name(&mut self, name: &String) -> String {
+        // mangle the local function name to avoid name conflicts
+        // "foo" -> "__local_fn_foo_0", "__local_fn_foo_1", etc.
+        let id = self.next_func_id;
+        self.next_func_id += 1;
+        format!("__local_fn_{}_{}", name, id)
     }
 
     fn open_bb(&mut self) -> usize {
@@ -1086,39 +1096,70 @@ impl IRGenerator {
         let mut idx = 1;
 
         fields.iter().for_each(|(key_opt, value_expr)| {
-            let key_op = if let Some(key_expr) = key_opt {
-                // hash-like, use provided key
-                // two cases: { [expr] = y, ... } or { x = y, ... }
-                // for the latter, key_expr is preprocessed into a string literal expression
-                // so we can just generate the expression directly
-                //
-                // see: Parser::parse_table_ctor for details
-                idx += 1;
-                self.generate_expr(key_expr)
-            } else {
-                // array-like, use next index
-                let key_reg = self.alloc_reg();
-                let key_op = IROperand::ImmFloat(idx as f64);
-                self.emit(IRInstruction::LoadImm {
-                    dest: key_reg,
-                    value: key_op,
-                });
-                idx += 1;
-                IROperand::Reg(key_reg)
-            };
+            match key_opt {
+                Some(k) => {
+                    // hash-like, use provided key
+                    // two cases: { [expr] = y, ... } or { x = y, ... }
+                    // for the latter, key_expr is preprocessed into a string literal expression
+                    // so we can just generate the expression directly
+                    // and, there's possibly manually specified num literal indices
+                    //
+                    // see: Parser::parse_table_ctor for details
+                    let key_reg = self.generate_expr(k);
+                    let value_reg = self.generate_expr(value_expr);
+                    let dest_reg = self.alloc_reg();
+                    match k {
+                        parser::ast::Expression::Literal(parser::ast::Literal::String(_)) => {
+                            // string literal key, can use SetMember instruction
+                            self.emit(IRInstruction::SetMember {
+                                dest: dest_reg,
+                                collection: tbl_reg.clone(),
+                                member: key_reg,
+                                value: value_reg,
+                            });
+                        }
+                        parser::ast::Expression::Literal(parser::ast::Literal::Number(_)) => {
+                            // numeric key, can use IndexOf instruction
+                            // this is basically array-like access, but with explicit keys
+                            self.emit(IRInstruction::SetIndex {
+                                dest: dest_reg,
+                                collection: tbl_reg.clone(),
+                                index: key_reg,
+                                value: value_reg,
+                            });
+                        }
+                        _ => {
+                            // general case, use SetTable with generated key operand
+                            self.emit(IRInstruction::SetTable {
+                                dest: dest_reg,
+                                table: tbl_reg.clone(),
+                                key: key_reg,
+                                value: value_reg,
+                            });
+                        }
+                    }
+                }
+                None => {
+                    // array-like field, key is the next index
+                    // we can directly use the index as the key operand in SetIndex
+                    let key_reg = self.alloc_reg();
+                    self.emit(IRInstruction::LoadImm {
+                        dest: key_reg,
+                        value: IROperand::ImmFloat(idx as f64),
+                    });
 
-            let value_op = self.generate_expr(value_expr);
+                    let value_reg = self.generate_expr(value_expr);
 
-            // set the key-value pair in the table
-            // do not seperate this op out of here,
-            // that is unfriendly for stack-based bytecode
-            let dest_reg = self.alloc_reg();
-            self.emit(IRInstruction::SetTable {
-                dest: dest_reg,
-                table: tbl_reg.clone(),
-                key: key_op,
-                value: value_op,
-            });
+                    let dest_reg = self.alloc_reg();
+                    self.emit(IRInstruction::SetIndex {
+                        dest: dest_reg,
+                        collection: tbl_reg.clone(),
+                        index: IROperand::Reg(key_reg),
+                        value: value_reg,
+                    });
+                }
+            }
+            idx += 1;
         });
 
         tbl_reg
@@ -1394,7 +1435,16 @@ impl IRGenerator {
         body: &Vec<parser::ast::Statement>,
     ) -> IROperand {
         let func_name = if let Some(name) = name {
-            name.clone()
+            if is_local {
+                // if local, mangle it to avoid name conflicts
+                self.mangle_local_fn_name(name)
+            } else {
+                // if global, just use the name directly
+                // note that the behavior of overwriting is not properly defined
+                // in this type of implementation
+                // so we'd better avoid any global function, except for entry point
+                name.clone()
+            }
         } else {
             self.alloc_anonymous_func_name()
         };
