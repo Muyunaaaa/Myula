@@ -1,2 +1,2 @@
-mod object;
-mod opcode;
+pub mod object;
+pub mod opcode;

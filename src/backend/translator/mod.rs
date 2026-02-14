@@ -1,2 +1,2 @@
-mod const_pool;
-mod emitter;
+pub mod emitter;
+pub mod scanner;

@@ -1,3 +1,3 @@
-mod deserializer;
-mod translator;
-mod vm;
+pub mod deserializer;
+pub mod translator;
+pub mod vm;
