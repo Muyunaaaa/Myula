@@ -19,6 +19,7 @@
 //      26-02-13: Added member access support in IR generation
 //      26-02-14: Removed AddrLocal instruction, replaced with direct use of local variable slots
 //                in LoadLocal and StoreLocal, to simplify the IR and avoid unnecessary instructions
+//      26-02-14: Added mangling for local function names to avoid name conflicts
 
 use std::collections::{HashMap, HashSet};
 
@@ -28,7 +29,7 @@ pub struct IRGenerator {
     module: IRModule,
     function_contexts: Vec<IRFunctionContext>,
 
-    next_anonymous_func_id: usize,
+    next_func_id: usize,
 
     errors: Vec<IRGeneratorError>,
 
@@ -644,7 +645,7 @@ impl IRGenerator {
         return IRGenerator {
             module: IRModule { functions: vec![] },
             function_contexts: vec![],
-            next_anonymous_func_id: 0,
+            next_func_id: 0,
             errors: vec![],
             scope_stack: vec![],
         };
@@ -682,9 +683,18 @@ impl IRGenerator {
     }
 
     fn alloc_anonymous_func_name(&mut self) -> String {
-        let id = self.next_anonymous_func_id;
-        self.next_anonymous_func_id += 1;
+        // generate a unique name for anonymous function literals
+        let id = self.next_func_id;
+        self.next_func_id += 1;
         format!("__anon_fn_{}", id)
+    }
+
+    fn mangle_local_fn_name(&mut self, name: &String) -> String {
+        // mangle the local function name to avoid name conflicts
+        // "foo" -> "__local_fn_foo_0", "__local_fn_foo_1", etc.
+        let id = self.next_func_id;
+        self.next_func_id += 1;
+        format!("__local_fn_{}_{}", name, id)
     }
 
     fn open_bb(&mut self) -> usize {
@@ -1394,7 +1404,16 @@ impl IRGenerator {
         body: &Vec<parser::ast::Statement>,
     ) -> IROperand {
         let func_name = if let Some(name) = name {
-            name.clone()
+            if is_local {
+                // if local, mangle it to avoid name conflicts
+                self.mangle_local_fn_name(name)
+            } else {
+                // if global, just use the name directly
+                // note that the behavior of overwriting is not properly defined
+                // in this type of implementation
+                // so we'd better avoid any global function, except for entry point
+                name.clone()
+            }
         } else {
             self.alloc_anonymous_func_name()
         };
