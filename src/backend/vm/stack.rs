@@ -6,7 +6,6 @@ pub struct StackFrame {
     pub func_name: String,
     pub registers: Vec<LuaValue>,
     pub pc: usize,
-    /// 返回地址
     pub ret_dest: Option<usize>,
 }
 

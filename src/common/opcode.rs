@@ -1,54 +1,47 @@
 use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnaryOpType {
-    Neg, // -
-    Not, // not
-    Len, // #
+    Neg,
+    Not, 
+    Len, //not involved in arithmetic negation, but rather the length operator #
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
-    /* --- 基础加载 --- */
     LoadK { dest: u16, const_idx: u16 },
     LoadNil { dest: u16 },
     LoadBool { dest: u16, value: bool },
     Move { dest: u16, src: u16 },
-
-    /* --- 变量访问 --- */
+    
     GetGlobal { dest: u16, name_idx: u16 },
     SetGlobal { name_idx: u16, src: u16 },
-
-    /* --- 算术与逻辑运算 --- */
+    
     Add { dest: u16, left: u16, right: u16 },
     Sub { dest: u16, left: u16, right: u16 },
     Mul { dest: u16, left: u16, right: u16 },
     Div { dest: u16, left: u16, right: u16 },
     Pow { dest: u16, left: u16, right: u16 },
-    Concat { dest: u16, left: u16, right: u16 }, // 新增
-    And { dest: u16, left: u16, right: u16 },    // 新增
-    Or { dest: u16, left: u16, right: u16 },     // 新增
+    Concat { dest: u16, left: u16, right: u16 }, 
+    And { dest: u16, left: u16, right: u16 },    
+    Or { dest: u16, left: u16, right: u16 },    
 
     UnOp { dest: u16, src: u16, op: UnaryOpType },
-
-    /* --- 比较 --- */
+    
     Eq { left: u16, right: u16 },
     Ne { left: u16, right: u16 },
     Lt { left: u16, right: u16 },
     Gt { left: u16, right: u16 },
     Le { left: u16, right: u16 },
     Ge { left: u16, right: u16 },
-
-    /* --- 跳转与测试 --- */
+    
     Test { reg: u16 },
     Jump { offset: i32 },
-
-    /* --- 表操作 --- */
+    
     NewTable { dest: u16, size_array: u16, size_hash: u16 },
     GetTable { dest: u16, table: u16, key: u16 },
     SetTable { table: u16, key: u16, value: u16 },
-
-    /* --- 函数 --- */
-    FnProto { dest: u16, proto_idx: u16 }, // 新增
+    
+    FnProto { dest: u16, proto_idx: u16 }, 
     Call { func_reg: u16, argc: u8, retc: u8 },
     Return { start: u16, count: u8 },
 
@@ -85,7 +78,7 @@ impl fmt::Display for OpCode {
             OpCode::Test { reg } => write!(f, "TEST     R{}", reg),
             OpCode::FnProto { dest, proto_idx } => write!(f, "FNPROTO  R{} K{}", dest, proto_idx),
             OpCode::Halt => write!(f, "HALT"),
-            _ => write!(f, "{:?}", self), // 处理未列出的指令
+            _ => write!(f, "{:?}", self), 
         }
     }
 }
