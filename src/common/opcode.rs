@@ -1,74 +1,91 @@
+use std::fmt;
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UnaryOpType {
+    Neg, // -
+    Not, // not
+    Len, // #
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
     /* --- 基础加载 --- */
-    /// R(A) := K(Bx)
-    /// 用于加载：数字、字符串、以及函数原型(FnProto)
     LoadK { dest: u16, const_idx: u16 },
-    /// R(A) := Nil
     LoadNil { dest: u16 },
-    /// R(A) := bool
     LoadBool { dest: u16, value: bool },
-    /// R(A) := R(B)
     Move { dest: u16, src: u16 },
 
     /* --- 变量访问 --- */
-    /// R(A) := Global[K(Bx)]
     GetGlobal { dest: u16, name_idx: u16 },
-    /// Global[K(Bx)] := R(A)
     SetGlobal { name_idx: u16, src: u16 },
 
     /* --- 算术与逻辑运算 --- */
-    /// 三地址：R(A) := R(B) op R(C)
     Add { dest: u16, left: u16, right: u16 },
     Sub { dest: u16, left: u16, right: u16 },
     Mul { dest: u16, left: u16, right: u16 },
     Div { dest: u16, left: u16, right: u16 },
-    Mod { dest: u16, left: u16, right: u16 }, // 取模
-    Pow { dest: u16, left: u16, right: u16 }, // 幂运算 (Lua常见)
+    Pow { dest: u16, left: u16, right: u16 },
+    Concat { dest: u16, left: u16, right: u16 }, // 新增
+    And { dest: u16, left: u16, right: u16 },    // 新增
+    Or { dest: u16, left: u16, right: u16 },     // 新增
 
-    /// 一元运算：R(A) := op R(B)
-    /// 对应 IRUnOp (Neg, Not, Len)
     UnOp { dest: u16, src: u16, op: UnaryOpType },
 
-    /* --- 比较与分支 (用于实现 Branch) --- */
-    /// 如果 R(A) == R(B) 不成立，则 PC++ (跳过下一条指令)
+    /* --- 比较 --- */
     Eq { left: u16, right: u16 },
-    Ge { left: u16, right: u16 },
-    Gt { left: u16, right: u16 },
-    Lt { left: u16, right: u16 },
-    Le { left: u16, right: u16 },
     Ne { left: u16, right: u16 },
+    Lt { left: u16, right: u16 },
+    Gt { left: u16, right: u16 },
+    Le { left: u16, right: u16 },
+    Ge { left: u16, right: u16 },
 
-    /// R(A) 为逻辑假(nil/false)时，PC++
+    /* --- 跳转与测试 --- */
     Test { reg: u16 },
-    /// 无条件跳转
     Jump { offset: i32 },
 
-    /* --- 表操作 (包含 IR 的 Member/Index 快速路径) --- */
-    /// R(A) := {}
-    NewTable { dest: u16, narr: u16, nrec: u16 },
-    /// R(A)[R(B)] := R(C)
-    SetTable { table: u16, key: u16, val: u16 },
-    /// R(A) := R(B)[R(C)]
+    /* --- 表操作 --- */
+    NewTable { dest: u16, size_array: u16, size_hash: u16 },
     GetTable { dest: u16, table: u16, key: u16 },
+    SetTable { table: u16, key: u16, value: u16 },
 
-    /// 优化路径：R(A) := R(B)["Member"]
-    /// 对应 IR 的 MemberOf，其中 const_idx 指向常量池中的字符串
-    GetMember { dest: u16, table: u16, const_idx: u16 },
-    SetMember { table: u16, const_idx: u16, val: u16 },
-
-    /* --- 函数调用 --- */
-    /// R(A) = R(func)(args...)
+    /* --- 函数 --- */
+    FnProto { dest: u16, proto_idx: u16 }, // 新增
     Call { func_reg: u16, argc: u8, retc: u8 },
-    /// 从 R(start) 开始返回 count 个值
     Return { start: u16, count: u8 },
 
     Halt,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum UnaryOpType {
-    Neg, // -x
-    Not, // not x
-    Len, // #x
+impl fmt::Display for OpCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OpCode::LoadK { dest, const_idx } => write!(f, "LOADK    R{} K{}", dest, const_idx),
+            OpCode::LoadNil { dest } => write!(f, "LOADNIL  R{}", dest),
+            OpCode::LoadBool { dest, value } => write!(f, "LOADBOOL R{} {}", dest, value),
+            OpCode::Move { dest, src } => write!(f, "MOVE     R{} R{}", dest, src),
+            OpCode::GetGlobal { dest, name_idx } => write!(f, "GETGLOBAL R{} K{}", dest, name_idx),
+            OpCode::SetGlobal { name_idx, src } => write!(f, "SETGLOBAL K{} R{}", name_idx, src),
+            OpCode::Add { dest, left, right } => write!(f, "ADD      R{} R{} R{}", dest, left, right),
+            OpCode::Sub { dest, left, right } => write!(f, "SUB      R{} R{} R{}", dest, left, right),
+            OpCode::Mul { dest, left, right } => write!(f, "MUL      R{} R{} R{}", dest, left, right),
+            OpCode::Div { dest, left, right } => write!(f, "DIV      R{} R{} R{}", dest, left, right),
+            OpCode::Pow { dest, left, right } => write!(f, "POW      R{} R{} R{}", dest, left, right),
+            OpCode::Eq { left, right } => write!(f, "EQ       R{} R{}", left, right),
+            OpCode::Ne { left, right } => write!(f, "NE       R{} R{}", left, right),
+            OpCode::Lt { left, right } => write!(f, "LT       R{} R{}", left, right),
+            OpCode::Gt { left, right } => write!(f, "GT       R{} R{}", left, right),
+            OpCode::Le { left, right } => write!(f, "LE       R{} R{}", left, right),
+            OpCode::Ge { left, right } => write!(f, "GE       R{} R{}", left, right),
+            OpCode::UnOp { dest, src, op } => write!(f, "UNOP     R{} R{} {:?}", dest, src, op),
+            OpCode::NewTable { dest, size_array, size_hash } => write!(f, "NEWTABLE R{} {} {}", dest, size_array, size_hash),
+            OpCode::GetTable { dest, table, key } => write!(f, "GETTABLE R{} R{} R{}", dest, table, key),
+            OpCode::SetTable { table, key, value } => write!(f, "SETTABLE R{} R{} R{}", table, key, value),
+            OpCode::Call { func_reg, argc, retc } => write!(f, "CALL     R{} {} {}", func_reg, argc, retc),
+            OpCode::Return { start, count } => write!(f, "RETURN   R{} {}", start, count),
+            OpCode::Jump { offset } => write!(f, "JUMP     {}", offset),
+            OpCode::Test { reg } => write!(f, "TEST     R{}", reg),
+            OpCode::FnProto { dest, proto_idx } => write!(f, "FNPROTO  R{} K{}", dest, proto_idx),
+            OpCode::Halt => write!(f, "HALT"),
+            _ => write!(f, "{:?}", self), // 处理未列出的指令
+        }
+    }
 }
