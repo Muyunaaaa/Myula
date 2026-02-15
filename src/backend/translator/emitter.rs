@@ -3,6 +3,7 @@ use crate::backend::translator::scanner::{Scanner, VarKind};
 use crate::common::opcode::{OpCode, UnaryOpType};
 use crate::common::object::LuaValue;
 
+//todo:check
 pub struct BytecodeEmitter<'a> {
     func_ir: &'a IRFunction,
     scanner: &'a Scanner,
