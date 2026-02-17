@@ -25,6 +25,7 @@ pub enum LuaValue {
     Number(f64),
     Boolean(bool),
     String(*mut GCObject<String>),
+    //TODO: 这里的 Table 需要改成一个专门的结构体，包含元表等信息
     Table(*mut GCObject<HashMap<LuaValue, LuaValue>>),
     Function(*mut GCObject<LFunction>),
     CFunc(CFunction),
