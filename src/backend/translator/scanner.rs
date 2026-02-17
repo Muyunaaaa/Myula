@@ -7,7 +7,7 @@
 //            implemented global variable discovery and function-level stack pressure mapping (func_stack_info) to support downstream code generation and memory management.
 
 use std::collections::{HashMap, HashSet};
-use crate::frontend::ir::{self, IRGenerator, IRModule, IRInstruction, IRTerminator, IROperand};
+use crate::frontend::ir::{self, IRModule, IRInstruction, IRTerminator, IROperand};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VarKind {
