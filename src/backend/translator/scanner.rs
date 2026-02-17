@@ -1,6 +1,6 @@
 // Myula compiler IR scanner
 // Created by: Yuyang Feng <mu_yunaaaa@mail.nwpu.edu.cn>
-//Changelog:
+// Changelog:
 // 2026-2-14: Implemented a comprehensive IR Scanner providing linear-scan register allocation and lifetime analysis;
 //            introduced VarKind to distinguish between temporary registers and local slots while tracking their live ranges via instr_count;
 //            added basic type inference for immediate loads and local storage;

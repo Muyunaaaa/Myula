@@ -1,14 +1,27 @@
+// Myula compiler IR emitter
+// Created by: Yuyang Feng <mu_yunaaaa@mail.nwpu.edu.cn>
+// Changelog:
+// 2026-02-15: Defined the emitter data structures and core methods;
+//            implemented the basic translation logic from IR instructions to bytecode, covering instruction types such as constant loading, arithmetic operations, table manipulations, and function calls;
+//            introduced constant pool management and register mapping mechanisms to support efficient bytecode generation;
+//            implemented handling for control flow instructions including branching and returns.
+// 2026-02-17: Implemented mapping and deduplication for variable names and function identifiers within the constant pool;
+//            ensured that identical string constants are stored only once;
+//            correctly handled the indexing relationship between functions/variables and their corresponding strings in the constant pool.
+
 use crate::frontend::ir::{IRFunction, IRInstruction, IROperand, IRTerminator, IRBinOp, IRUnOp};
 use crate::backend::translator::scanner::{Scanner, VarKind};
 use crate::common::opcode::{OpCode, UnaryOpType};
 use crate::common::object::LuaValue;
+use std::collections::HashMap;
 
-//todo:check
 pub struct BytecodeEmitter<'a> {
     func_ir: &'a IRFunction,
     scanner: &'a Scanner,
     constants: Vec<LuaValue>,
     bytecode: Vec<OpCode>,
+    const_map: HashMap<LuaValue, u16>,
+    var_literals: HashMap<usize, IROperand>,
 }
 
 impl<'a> BytecodeEmitter<'a> {
@@ -18,6 +31,8 @@ impl<'a> BytecodeEmitter<'a> {
             scanner: scanner,
             constants: Vec::new(),
             bytecode: Vec::new(),
+            const_map: HashMap::new(),
+            var_literals: HashMap::new(),
         }
     }
 
@@ -34,6 +49,8 @@ impl<'a> BytecodeEmitter<'a> {
     fn emit_instr(&mut self, instr: &IRInstruction) {
         match instr {
             IRInstruction::LoadImm { dest, value } => {
+                self.var_literals.insert(*dest, value.clone());
+
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
                 match value {
                     IROperand::ImmFloat(f) => {
@@ -44,8 +61,8 @@ impl<'a> BytecodeEmitter<'a> {
                         self.bytecode.push(OpCode::LoadBool { dest: d, value: *b });
                     }
                     IROperand::Nil => self.bytecode.push(OpCode::LoadNil { dest: d }),
-                    IROperand::ImmStr(_) => {
-                        let c_idx = self.add_constant(LuaValue::Nil);
+                    IROperand::ImmStr(s) => {
+                        let c_idx = self.add_constant(LuaValue::TempString(s.clone()));
                         self.bytecode.push(OpCode::LoadK { dest: d, const_idx: c_idx });
                     }
                     _ => {}
@@ -114,7 +131,7 @@ impl<'a> BytecodeEmitter<'a> {
 
             IRInstruction::FnProto { dest, func_proto } => {
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
-                let proto_idx = self.add_constant(LuaValue::Nil);
+                let proto_idx = self.add_constant(LuaValue::TempString(func_proto.to_string()));
                 self.bytecode.push(OpCode::FnProto { dest: d, proto_idx });
             }
 
@@ -131,16 +148,27 @@ impl<'a> BytecodeEmitter<'a> {
 
             IRInstruction::LoadGlobal { dest, name } => {
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
-                let name_idx = self.add_constant(LuaValue::Nil);
+                let name_idx = match name {
+                    IROperand::ImmStr(s) => self.add_constant(LuaValue::TempString(s.clone())),
+                    IROperand::Reg(id) => self.get_literal_as_const(id),
+                    _ => self.add_constant(LuaValue::Nil),
+                };
                 self.bytecode.push(OpCode::GetGlobal { dest: d, name_idx });
             }
-            IRInstruction::StoreGlobal { dest, name: _, src } => {
-                let name_idx = self.add_constant(LuaValue::Nil);
+
+            IRInstruction::StoreGlobal { dest, name, src } => {
+                let name_idx = match name {
+                    IROperand::ImmStr(s) => self.add_constant(LuaValue::TempString(s.clone())),
+                    IROperand::Reg(id) => self.get_literal_as_const(id),
+                    _ => self.add_constant(LuaValue::Nil),
+                };
+
                 let s = self.get_reg_index(src);
                 self.bytecode.push(OpCode::SetGlobal { name_idx, src: s });
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
                 self.bytecode.push(OpCode::Move { dest: d, src: s });
             }
+
             IRInstruction::LoadLocal { dest, src } => {
                 if let IROperand::Slot(id) = src {
                     let d = self.get_phys_reg(VarKind::Reg(*dest));
@@ -148,6 +176,7 @@ impl<'a> BytecodeEmitter<'a> {
                     self.bytecode.push(OpCode::Move { dest: d, src: s });
                 }
             }
+
             IRInstruction::StoreLocal { dest, dst, src } => {
                 if let IROperand::Slot(id) = dst {
                     let slot = self.get_phys_reg(VarKind::Slot(*id));
@@ -172,16 +201,24 @@ impl<'a> BytecodeEmitter<'a> {
                     self.bytecode.push(OpCode::Return { start: 0, count: 0 });
                 }
             }
-            IRTerminator::Branch { cond, br_true: _, br_false: _ } => {
+            IRTerminator::Branch { cond, .. } => {
                 let r_cond = self.get_reg_index(cond);
                 self.bytecode.push(OpCode::Test { reg: r_cond });
-                self.bytecode.push(OpCode::Jump { offset: 0 }); // False path placeholder
-                self.bytecode.push(OpCode::Jump { offset: 0 }); // True path placeholder
+                self.bytecode.push(OpCode::Jump { offset: 0 });
+                self.bytecode.push(OpCode::Jump { offset: 0 });
             }
             IRTerminator::Jump(_) => {
                 self.bytecode.push(OpCode::Jump { offset: 0 });
             }
             _ => {}
+        }
+    }
+
+    fn get_literal_as_const(&mut self, reg_id: &usize) -> u16 {
+        match self.var_literals.get(reg_id).cloned() {
+            Some(IROperand::ImmStr(s)) => self.add_constant(LuaValue::TempString(s)),
+            Some(IROperand::ImmFloat(f)) => self.add_constant(LuaValue::Number(f)),
+            _ => self.add_constant(LuaValue::Nil),
         }
     }
 
@@ -198,7 +235,12 @@ impl<'a> BytecodeEmitter<'a> {
     }
 
     fn add_constant(&mut self, val: LuaValue) -> u16 {
-        self.constants.push(val);
-        (self.constants.len() - 1) as u16
+        if let Some(&idx) = self.const_map.get(&val) {
+            return idx;
+        }
+        let idx = self.constants.len() as u16;
+        self.constants.push(val.clone());
+        self.const_map.insert(val, idx);
+        idx
     }
 }

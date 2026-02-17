@@ -1,6 +1,5 @@
-/*
-   函数栈帧实现
-*/
+// Myula compiler stack frame definitions
+// Created by: Yuyang Feng <mu_yunaaaa@mail.nwpu.edu.cn>
 use crate::common::object::LuaValue;
 pub struct StackFrame {
     pub func_name: String,

@@ -20,8 +20,8 @@ mod ir_printer {
 
         let lua_code = fs::read_to_string(file_path).expect("读取文件失败");
 
-        // 1. 编译流水线
         let mut lexer = Lexer::new(&lua_code);
+
         let mut parser = Parser::new(&mut lexer);
         let program = parser.parse();
 
@@ -36,5 +36,20 @@ mod ir_printer {
         println!("\n{:=^80}", format!(" Myula IR 镜像: {} ", file_path));
         println!("{}", module.to_string());
         println!("{:=^80}\n", " 打印结束 ");
+
+        let lexer = parser.get_lexer();
+        let lexer_err = lexer.get_err();
+        let parser_err = parser.get_err();
+        let ir_err = ir_gen.get_err();
+
+        if !lexer_err.is_empty() {
+            println!("[Lexer Errors]: {:#?}", lexer_err);
+        }
+        if !parser_err.is_empty() {
+            println!("[Parser Errors]: {:#?}", parser_err);
+        }
+        if !ir_err.is_empty() {
+            println!("[IR Generation Errors]: {:#?}", ir_err);
+        }
     }
 }

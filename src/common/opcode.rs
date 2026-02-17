@@ -3,7 +3,7 @@ use std::fmt;
 pub enum UnaryOpType {
     Neg,
     Not, 
-    Len, //not involved in arithmetic negation, but rather the length operator #
+    Len, 
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -1,13 +1,24 @@
+// Myula compiler VM
+// Created by: Yuyang Feng <mu_yunaaaa@mail.nwpu.edu.cn>
+// Changelog:
+// 2026-02-15: Finalized the VM data structures and core components;
+//            designed FuncMetadata to store function-related bytecode, constant pools, and register lifetime information;
+//            implemented the VirtualMachine initialization process, including function extraction from IR modules, bytecode generation, and entry frame preparation;
+//            introduced the dump_internal_state method for debugging and verifying VM state;
+//            designed the VM register clearing mechanism to support lifetime management and GC-friendliness.
+// 2026-02-17: Introduced the heap and converted string constants into GC-managed string objects;
+//            ensured they are correctly processed and reclaimed during the runtime phase.
 pub mod dispatch;
 pub mod heap;
 pub mod stack;
 
-use crate::common::object::{LuaValue, LFunction};
-use crate::backend::translator::scanner::{Scanner, VarKind, Lifetime};
+use crate::common::object::{LuaValue};
+use crate::backend::translator::scanner::{Scanner,Lifetime};
 use crate::frontend::ir::{IRModule, IRGenerator};
 use crate::backend::vm::stack::StackFrame;
 use crate::backend::translator::emitter::BytecodeEmitter;
 use std::collections::HashMap;
+use crate::backend::vm::heap::Heap;
 use crate::common::opcode::OpCode;
 
 pub struct FuncMetadata {
@@ -23,6 +34,7 @@ pub struct VirtualMachine {
     pub globals: HashMap<String, LuaValue>,
     pub module: IRModule,
     pub func_meta: HashMap<String, FuncMetadata>,
+    pub heap: Heap,
 }
 
 impl VirtualMachine {
@@ -32,26 +44,24 @@ impl VirtualMachine {
             globals: HashMap::new(),
             module: IRModule { functions: vec![] },
             func_meta: HashMap::new(),
+            heap: Heap::new(),
         }
     }
 
-    /// 初始化虚拟机：IR 扫描 -> 寄存器分配 -> 字节码生成 -> 入口帧准备
+    /// IR 扫描 -> 寄存器分配 -> 字节码生成 -> 入口帧准备
     pub fn init(&mut self, generator: &IRGenerator) {
         self.module = generator.get_module().clone();
 
         let mut scanner = Scanner::new();
         scanner.global_scan(&self.module);
 
-        // 3. 为 IR 中的每个函数生成元数据和字节码
         for func_ir in &self.module.functions {
             let func_name = &func_ir.name;
 
-            // 获取 Scanner 分配的栈压力信息 (num_locals, max_stack_size)
             let (num_locals, max_usage) = scanner.func_stack_info.get(func_name)
                 .cloned()
                 .unwrap_or((0, 0));
 
-            // 构建物理寄存器生命周期映射
             let mut reg_info_map = HashMap::new();
             for ((f_name, var_kind), &phys_idx) in &scanner.reg_map {
                 if f_name == func_name {
@@ -61,7 +71,6 @@ impl VirtualMachine {
                 }
             }
 
-            // 核心步骤：调用 Emitter 将该函数的 IR 指令流转换为 OpCode
             let emitter = BytecodeEmitter::new(func_ir, &scanner);
             let (bytecode, constants) = emitter.emit();
 
@@ -76,7 +85,8 @@ impl VirtualMachine {
             self.func_meta.insert(func_name.clone(), meta);
         }
 
-        // 4. 准备主入口 (_start) 的栈帧
+        self.finalize_constants();
+
         self.prepare_entry_frame();
 
         println!(
@@ -107,10 +117,9 @@ impl VirtualMachine {
             panic!("[VM 致命错误] 调用栈未初始化。");
         }
 
-        // 此处逻辑暂不实现，将由未来的 dispatch 模块处理指令循环
     }
 
-    /// 寄存器清理逻辑：根据 Scanner 提供的生命周期，在指令执行后释放不再使用的寄存器
+    // 寄存器清理逻辑：根据 Scanner 提供的生命周期，在指令执行后释放不再使用的寄存器
     #[allow(dead_code)]
     fn cleanup_expired_registers(&mut self) {
         // 获取当前顶层栈帧
@@ -166,5 +175,21 @@ impl VirtualMachine {
             }
         }
         println!("{}\n", "=".repeat(50));
+    }
+
+    //用于将所有临时字符串常量转换为 GC 管理的字符串对象，确保在运行时阶段它们能被正确处理和回收
+    pub fn finalize_constants(&mut self) {
+        for meta in self.func_meta.values_mut() {
+            for val in &mut meta.constants {
+                if let LuaValue::TempString(_) = val {
+                    if let LuaValue::TempString(raw_s) = std::mem::replace(val, LuaValue::Nil) {
+                        let gc_ptr = self.heap.alloc_string(raw_s);
+                        *val = LuaValue::String(gc_ptr);
+                    }
+                }
+            }
+        }
+
+        println!("[VM] 常量池转换完成，进入运行时就绪状态。");
     }
 }
