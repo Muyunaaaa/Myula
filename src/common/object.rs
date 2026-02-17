@@ -10,9 +10,14 @@ pub struct HeaderOnly;
 #[repr(C)]
 pub struct GCObject<T> {
     pub mark: bool,
+    pub kind: ObjectKind,
+    pub size: usize,
     pub next: *mut GCObject<HeaderOnly>,
     pub data: T,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum ObjectKind { String, Table, Function }
 
 #[derive(Clone, PartialEq)]
 pub enum LuaValue {
