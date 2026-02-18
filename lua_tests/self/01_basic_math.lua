@@ -1,4 +1,5 @@
 -- 测试：立即数加载、算术运算、多参数 print
+-- TEST SUCCESSFUL
 local a = 10
 local b = 20
 local c = a + b

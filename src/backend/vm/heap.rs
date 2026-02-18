@@ -1,19 +1,21 @@
 // Myula compiler heap
 // Created by: Yuyang Feng <mu_yunaaaa@mail.nwpu.edu.cn>
 // Changelog:
-// 2026-02-17: Initial implementation of Heap with string interning and basic GC object management; 
-//            added alloc_string method to manage string objects and maintain a string pool for efficient 
+// 2026-02-17: Initial implementation of Heap with string interning and basic GC object management;
+//            added alloc_string method to manage string objects and maintain a string pool for efficient
 //            memory usage and quick lookups.
 // 2026-02-18: Major Memory Management & Type-Aware Evolution:
-//            [Polymorphic Allocation]: Introduced specialized allocators `alloc_table` and `alloc_function`, 
+//            [Polymorphic Allocation]: Introduced specialized allocators `alloc_table` and `alloc_function`,
 //            supporting the instantiation of complex heap objects beyond raw strings;
-//            [Precise Memory Tracking]: Implemented a sophisticated memory accounting system that calculates 
-//            not just struct sizes, but the heap-allocated capacity of internal containers (String data, 
+//            [Precise Memory Tracking]: Implemented a sophisticated memory accounting system that calculates
+//            not just struct sizes, but the heap-allocated capacity of internal containers (String data,
 //            HashMap buckets, and OpCode/Constant vectors);
-//            [GC Control Logic]: Integrated `check_gc_condition` and `expand_threshold` to implement a 
+//            [GC Control Logic]: Integrated `check_gc_condition` and `expand_threshold` to implement a
 //            dynamic GC triggering mechanism, providing a balance between memory footprint and execution throughput;
-//            [Memory Safety]: Added a hard memory limit check (HARD_MEMORY_LIMIT) within `alloc_raw_object` 
+//            [Memory Safety]: Added a hard memory limit check (HARD_MEMORY_LIMIT) within `alloc_raw_object`
 //            to provide an ultimate safeguard against OOM scenarios in the VM runtime.
+// 2026-02-19: Add more debug information for GC tuning, including max_allocated to track peak memory usage during execution, 
+//            aiding in optimizing GC thresholds and understanding memory patterns of Lua programs running on the VM.
 use crate::common::object::{GCObject, HeaderOnly, ObjectKind, LFunction, LuaValue};
 use std::collections::HashMap;
 
@@ -22,6 +24,8 @@ pub struct Heap {
     pub string_pool: HashMap<String, *mut GCObject<String>>,
     pub total_allocated: usize,
     pub threshold: usize,
+    // used for debugging and tuning GC parameters, not used in actual GC logic
+    pub max_allocated: usize,
 }
 
 impl Heap {
@@ -30,7 +34,8 @@ impl Heap {
             all_objects: std::ptr::null_mut(),
             string_pool: HashMap::new(),
             total_allocated: 0,
-            threshold: 1024 * 1024,
+            threshold: crate::backend::vm::VM_THRESHOLD,
+            max_allocated: 0,
         }
     }
 
@@ -81,6 +86,10 @@ impl Heap {
         self.all_objects = ptr as *mut GCObject<HeaderOnly>;
 
         self.total_allocated += size;
+
+        if(self.total_allocated > self.max_allocated) {
+            self.max_allocated = self.total_allocated;
+        }
 
         Some(ptr)
     }

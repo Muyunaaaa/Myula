@@ -1,4 +1,5 @@
 -- 测试：递归调用（栈深度检查）、条件分支、大内存分配
+-- TEST FAILED
 local function factorial(n)
     if n <= 1 then
         return 1

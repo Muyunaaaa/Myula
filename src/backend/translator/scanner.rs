@@ -5,6 +5,10 @@
 //            introduced VarKind to distinguish between temporary registers and local slots while tracking their live ranges via instr_count;
 //            added basic type inference for immediate loads and local storage;
 //            implemented global variable discovery and function-level stack pressure mapping (func_stack_info) to support downstream code generation and memory management.
+// 2026-02-19: Introduced Conservative Stride-based Register Allocation;
+//            set a stride of 4 for TEMP registers to force physical isolation and create implicit parameter buffers;
+//            fixed Register Aliasing conflicts occurring during parameter passing in CALL instructions,
+//            significantly improving compiler and VM stability.
 
 use std::collections::{HashMap, HashSet};
 use crate::frontend::ir::{self, IRModule, IRInstruction, IRTerminator, IROperand};
@@ -91,10 +95,16 @@ impl Scanner {
 
         //FIXME: 这里的寄存器分配策略必须要优化，未来可能会出现突然挂掉的情况，原因如下
 
-        // 这里强行改变了寄存器分配的策略，增加了寄存器之间的间距，以减少 Call 指令参数覆盖到活跃寄存器的概率。
+        // 我们这里出现一个问题，即scanner没有考虑到call进行函数调用的时候参数会覆盖活跃寄存器的情况。
+        // 我们的临时解决办法是
+        // 强行改变寄存器分配的策略，增加了寄存器之间的间距，以减少 Call 指令参数覆盖到活跃寄存器的概率。
         // 但这样的策略依旧没有从根本上解决问题，因为如果函数内的活跃寄存器数量超过了预留的间距，仍然可能发生覆盖。
         // 我们不考虑复杂的窗口预留，为了安全，我们让 TEMP 变量的起始位置稍微远离 Local 变量区，给 Call 指令的参数腾出位置。
         // 合理的做法是扫描call指令的参数多少，动态调整间距或者预留空间，但这会增加实现复杂度。
+        // 假设 Lua 函数调用最常见的是 1-5 个参数。
+        // 我们将步进间隔设置为 4，这意味着每个 TEMP 变量后面都跟着 3 个空位。
+        // 这能完美防御任何参数少于 4 个的函数调用（如 print(a, b, c)）。
+        let stride = 4;
         let mut next_temp_idx = num_slots;
         let mut max_usage = num_slots;
 
@@ -112,18 +122,16 @@ impl Scanner {
                 reused_idx
             } else {
                 let idx = next_temp_idx;
-                // 每分配一个新寄存器，我们增加步长
-                // 这样即便发生 Call，参数覆盖到空位的概率也会大大增加
-                next_temp_idx += 2; // 步进改为 2，增加寄存器之间的间距
+                next_temp_idx += stride;
                 idx
             };
 
             self.reg_map.insert(key.clone(), phys_idx);
             active.push((key, lt.clone(), phys_idx));
-            max_usage = max_usage.max(phys_idx + 1);
+            max_usage = max_usage.max(phys_idx + stride);
         }
 
-        self.func_stack_info.insert(func_name.clone(), (num_slots, max_usage + 5)); // 额外预留 5 个缓冲
+        self.func_stack_info.insert(func_name.clone(), (num_slots, max_usage + stride));
     }
 
     fn process_instr(&mut self, func_name: &str, instr: &IRInstruction) {

@@ -20,6 +20,7 @@
 //            implemented synchronized string-pool cleanup during the sweep phase to prevent dangling pointers;
 //            Optimized performance by deprecating aggressive register auto-nulling in favor of a stable,
 //            frame-level reclamation strategy, resolving critical "Nil" value propagation bugs during cross-instruction execution.
+// 2026-02-19: Add more debug messages for instruction execution and GC events, providing better visibility into the VM's internal workings during development and testing.
 pub mod dispatch;
 pub mod error;
 pub mod heap;
@@ -51,6 +52,7 @@ pub struct FuncMetadata {
 
 const MAX_CALL_STACK: usize = 1000;
 const HARD_MEMORY_LIMIT: usize = 1024 * 1024 * 512;//512MB
+const VM_THRESHOLD: usize = 1024 * 8 ;//8KB
 
 pub struct VirtualMachine {
     pub call_stack: Vec<StackFrame>,
@@ -170,6 +172,7 @@ impl VirtualMachine {
                 self.sweep_objects();
             }
         }
+        println!("[VM] Max memory allocated during execution: {} bytes", self.heap.max_allocated);
         println!("[VM] Execution completed. Program exited with code 0.");
     }
     fn protected_step(&mut self) -> Result<(), VMError> {
@@ -315,6 +318,10 @@ impl VirtualMachine {
             let mut p_prev: *mut GCObject<HeaderOnly> = std::ptr::null_mut();
             let mut p_curr = self.heap.all_objects;
 
+            // use for debug and performance monitoring
+            let mut swept_count = 0;
+            let mut swept_bytes = 0;
+
             while !p_curr.is_null() {
                 if (*p_curr).mark {
                     (*p_curr).mark = false;
@@ -331,20 +338,15 @@ impl VirtualMachine {
                     let kind = (*p_curr).kind;
                     let obj_size = (*p_curr).size;
 
+                    swept_count += 1;
+                    swept_bytes += obj_size;
+
                     self.heap.total_allocated = self.heap.total_allocated.saturating_sub(obj_size);
 
-                    // 还原类型并释放
-                    // 只有转回正确的具体类型，Box 销毁时才会调用 data 字段（如 String, HashMap）的 Drop
-                    // 从而释放这些容器内部拥有的第二层堆内存。
                     match kind {
                         ObjectKind::String => {
                             let str_ptr = p_curr as *mut GCObject<String>;
-
-                            // 清理 string_pool：移除指向已释放对象的悬垂指针
-                            // 主要解决的是，如果一个字符串对象被回收了，但 string_pool 里仍然保留着指向它的指针
-                            // 那么下次在创建同样的字面量字符串时，string_pool 会错误地认为它已经存在，返回一个悬垂指针，导致未定义行为
                             self.heap.string_pool.remove(&(*str_ptr).data);
-
                             let _ = Box::from_raw(str_ptr);
                         }
                         ObjectKind::Table => {
@@ -361,6 +363,16 @@ impl VirtualMachine {
 
                     p_curr = p_next;
                 }
+            }
+
+            //use for debug and performance monitoring
+            if swept_count > 0 {
+                println!(
+                    "[GC] Sweep phase finished: reclaimed {} objects, {} bytes released. Current heap: {} bytes.",
+                    swept_count,
+                    swept_bytes,
+                    self.heap.total_allocated
+                );
             }
         }
     }

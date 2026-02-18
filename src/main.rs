@@ -9,7 +9,7 @@ fn main() {
     test_vm_from_file();
 }
 fn test_vm_from_file() {
-    let file_path = "./lua_tests/self/02_string_gc.lua";
+    let file_path = "./lua_tests/self/06_full_syntax.lua";
     assert!(Path::new(file_path).exists(), "测试文件不存在: {}", file_path);
 
     let source = fs::read_to_string(file_path)
@@ -32,7 +32,7 @@ fn test_vm_from_file() {
 
     vm.run();
 
-    // 5. 打印 VM 内部状态（查看生成的 OpCode 和寄存器分配）
-    println!("\n--- 编译产物展示 ---");
-    vm.dump_internal_state();
+    // // 5. 打印 VM 内部状态（查看生成的 OpCode 和寄存器分配）
+    // println!("\n--- 编译产物展示 ---");
+    // vm.dump_internal_state();
 }
