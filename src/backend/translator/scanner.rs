@@ -84,11 +84,17 @@ impl Scanner {
             .filter(|((f, kind), _)| f == func_name && matches!(kind, VarKind::Reg(_)))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-
         temps.sort_by_key(|(_, lt)| lt.start);
 
         let mut active: Vec<((String, VarKind), Lifetime, usize)> = Vec::new();
         let mut free_registers: Vec<usize> = Vec::new();
+
+        //FIXME: 这里的寄存器分配策略必须要优化，未来可能会出现突然挂掉的情况，原因如下
+
+        // 这里强行改变了寄存器分配的策略，增加了寄存器之间的间距，以减少 Call 指令参数覆盖到活跃寄存器的概率。
+        // 但这样的策略依旧没有从根本上解决问题，因为如果函数内的活跃寄存器数量超过了预留的间距，仍然可能发生覆盖。
+        // 我们不考虑复杂的窗口预留，为了安全，我们让 TEMP 变量的起始位置稍微远离 Local 变量区，给 Call 指令的参数腾出位置。
+        // 合理的做法是扫描call指令的参数多少，动态调整间距或者预留空间，但这会增加实现复杂度。
         let mut next_temp_idx = num_slots;
         let mut max_usage = num_slots;
 
@@ -106,16 +112,18 @@ impl Scanner {
                 reused_idx
             } else {
                 let idx = next_temp_idx;
-                next_temp_idx += 1;
+                // 每分配一个新寄存器，我们增加步长
+                // 这样即便发生 Call，参数覆盖到空位的概率也会大大增加
+                next_temp_idx += 2; // 步进改为 2，增加寄存器之间的间距
                 idx
             };
 
             self.reg_map.insert(key.clone(), phys_idx);
             active.push((key, lt.clone(), phys_idx));
-            max_usage = max_usage.max(active.len() + num_slots);
+            max_usage = max_usage.max(phys_idx + 1);
         }
 
-        self.func_stack_info.insert(func_name.clone(), (num_slots, max_usage));
+        self.func_stack_info.insert(func_name.clone(), (num_slots, max_usage + 5)); // 额外预留 5 个缓冲
     }
 
     fn process_instr(&mut self, func_name: &str, instr: &IRInstruction) {
@@ -158,7 +166,24 @@ impl Scanner {
             IRInstruction::Call { dest, callee, args } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 self.record_use(func_name, callee);
-                for arg in args { self.record_use(func_name, arg); }
+                // 将所有参数的生命周期延长到当前指令 PC + 1
+                // 这样可以确保在线性扫描分配时，这些寄存器在 Call 执行期间不会被视为“可回收”
+                for arg in args {
+                    self.record_use(func_name, arg);
+                    if let IROperand::Reg(id) = arg {
+                        let key = (func_name.to_string(), VarKind::Reg(*id));
+                        if let Some(lt) = self.lifetimes.get_mut(&key) {
+                            lt.end = self.instr_count + 1;
+                        }
+                    }
+                }
+
+                if let IROperand::Reg(id) = callee {
+                    let key = (func_name.to_string(), VarKind::Reg(*id));
+                    if let Some(lt) = self.lifetimes.get_mut(&key) {
+                        lt.end = self.instr_count + 1;
+                    }
+                }
             }
             IRInstruction::LoadGlobal { dest, name } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
