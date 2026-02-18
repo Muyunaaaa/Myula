@@ -3,7 +3,7 @@ local header = "Myula"
 local space = " "
 local version = "v2026"
 --TODO: 需要等待 ir 实现concat
-local full_name = header .. space .. version -- 触发大量 alloc_string
+--local full_name = header .. space .. version -- 触发大量 alloc_string
 
 print("String Test:")
 print("Full Name:", full_name)
