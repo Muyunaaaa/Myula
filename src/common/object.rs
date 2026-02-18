@@ -34,7 +34,6 @@ pub enum LuaValue {
     String(*mut GCObject<String>),
     Table(*mut GCObject<LuaTable>),
     Function(*mut GCObject<LFunction>),
-    //TODO: 添加 CFunction 支持, 也就是同时支持lua的全部std, 需要前端修复ir后才可测试
     CFunc(CFunction),
     UserData(*mut std::ffi::c_void),
     TempString(String)
