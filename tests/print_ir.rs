@@ -9,7 +9,7 @@ mod ir_printer {
     #[test]
     fn print_lua_ir_structure() {
         // ================= 配置区域 =================
-        let file_path = "./lua_tests/self/01_basic_math.lua";
+        let file_path = "./lua_tests/self/02_string_gc.lua";
         // ===========================================
 
         if !Path::new(file_path).exists() {

@@ -9,7 +9,7 @@ use myula::backend::vm::VirtualMachine;
 #[test]
 fn test_vm_from_lua_file() {
     // 1. 读取外部 Lua 文件
-    let file_path = "./lua_tests/deep_test.lua";
+    let file_path = "./lua_tests/self/02_string_gc.lua";
     assert!(Path::new(file_path).exists(), "测试文件不存在: {}", file_path);
 
     let source = fs::read_to_string(file_path)

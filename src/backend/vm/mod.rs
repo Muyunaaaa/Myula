@@ -104,8 +104,7 @@ impl VirtualMachine {
                 num_locals,
                 max_stack_size: max_usage + 2,//FIXME:这里的 +2 是为了给函数调用时的返回地址和参数留出空间，后续可以根据实际情况调整
                 reg_metadata: reg_info_map,
-                //FIXME:这里需要irModule实现一个方法来查询每个函数的子函数列表，目前先放一个空的占位符
-                child_protos: Vec::new(),
+                child_protos: func_ir.sub_functions.clone(),
             };
 
             self.func_meta.insert(func_name.clone(), meta);

@@ -77,6 +77,7 @@ impl fmt::Display for OpCode {
             OpCode::Jump { offset } => write!(f, "JUMP     {}", offset),
             OpCode::Test { reg } => write!(f, "TEST     R{}", reg),
             OpCode::FnProto { dest, proto_idx } => write!(f, "FNPROTO  R{} K{}", dest, proto_idx),
+            OpCode::Concat { dest, left, right } => { write!(f, "CONCAT   R{} R{} R{}", dest, left, right) },
             OpCode::Halt => write!(f, "HALT"),
             _ => write!(f, "{:?}", self), 
         }

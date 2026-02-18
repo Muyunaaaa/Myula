@@ -571,7 +571,7 @@ pub struct IRFunction {
     pub params: Vec<String>,
     pub basic_blocks: Vec<IRBasicBlock>,
     pub local_variables: HashMap<String, IRLocalVarSlot>, // local variable name -> slot number
-    sub_functions: Vec<String>, // names of sub function prototypes
+    pub sub_functions: Vec<String>, // names of sub function prototypes
 }
 
 impl IRFunction {
