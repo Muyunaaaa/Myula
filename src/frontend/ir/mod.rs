@@ -20,8 +20,10 @@
 //      26-02-14: Removed AddrLocal instruction, replaced with direct use of local variable slots
 //                in LoadLocal and StoreLocal, to simplify the IR and avoid unnecessary instructions
 //      26-02-14: Added mangling for local function names to avoid name conflicts
+//      26-02-18: Refactored IR generator and removed some redundant features like scope stack
+//      26-02-18: Added subfunction metadata for functions
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 
 use crate::frontend::parser;
 
@@ -32,13 +34,6 @@ pub struct IRGenerator {
     next_func_id: usize,
 
     errors: Vec<IRGeneratorError>,
-
-    scope_stack: Vec<IRScope>,
-}
-
-#[derive(Debug, Clone)]
-pub struct IRScope {
-    local_variables: HashMap<String, IRLocalVarSlot>, // local variable name -> slot number
 }
 
 type IRLocalVarSlot = usize;
@@ -48,16 +43,17 @@ struct IRFunctionContext {
     name: String,
     params: Vec<String>,
 
+    // local variable name -> slot number
+    local_variables: HashMap<String, IRLocalVarSlot>,
+
+    // names of sub function prototypes
+    sub_functions: Vec<String>,
+
     active_block: Option<IRActiveBlock>,
     basic_blocks: Vec<IRBasicBlock>,
 
     next_reg: usize,
     next_block_id: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct IRGlobalScope {
-    variables: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -575,6 +571,7 @@ pub struct IRFunction {
     pub params: Vec<String>,
     pub basic_blocks: Vec<IRBasicBlock>,
     pub local_variables: HashMap<String, IRLocalVarSlot>, // local variable name -> slot number
+    sub_functions: Vec<String>, // names of sub function prototypes
 }
 
 impl IRFunction {
@@ -590,6 +587,17 @@ impl IRFunction {
             vars.sort_by_key(|(slot, _)| *slot);
             vars.iter()
                 .map(|(_, s)| s.clone())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let sub_fns_str = if self.sub_functions.is_empty() {
+            "; <no sub functions>".to_string()
+        } else {
+            self.sub_functions
+                .iter()
+                .zip(0..)
+                .map(|(name, i)| format!("; subfn #{}: @{}", i, name))
                 .collect::<Vec<_>>()
                 .join("\n")
         };
@@ -612,8 +620,8 @@ impl IRFunction {
             &params.join(", ")
         };
         format!(
-            "function {}({}) {{\n{}\n{}}}",
-            self.name, param_str, local_vars_str, bbs_str
+            "function {}({}) {{\n{}\n;\n{}\n{}}}",
+            self.name, param_str, local_vars_str, sub_fns_str, bbs_str
         )
     }
 }
@@ -647,7 +655,6 @@ impl IRGenerator {
             function_contexts: vec![],
             next_func_id: 0,
             errors: vec![],
-            scope_stack: vec![],
         };
     }
 
@@ -730,29 +737,30 @@ impl IRGenerator {
     }
 
     fn open_function(&mut self, name: String, params: Vec<String>) {
+        // if not topmost,
+        // add sub function name to sub function list of the current function
+        if let Some(ctx) = self.function_contexts.last_mut() {
+            ctx.sub_functions.push(name.clone());
+        }
+
         self.function_contexts.push(IRFunctionContext {
             name,
             params: params,
+            local_variables: HashMap::new(),
+            sub_functions: vec![],
             active_block: None,
             basic_blocks: vec![],
             next_reg: 0,
             next_block_id: 0,
         });
-
-        // enter the function scope
-        self.push_scope();
     }
 
     fn close_function(&mut self) {
         // leave the function scope
         let local_vars = self
-            .scope_stack
-            .last()
-            .expect("No active scope to get local variables")
+            .current_context()
             .local_variables
             .clone();
-
-        self.pop_scope();
 
         let ctx = self
             .function_contexts
@@ -763,6 +771,7 @@ impl IRGenerator {
             params: ctx.params,
             basic_blocks: ctx.basic_blocks,
             local_variables: local_vars,
+            sub_functions: ctx.sub_functions,
         };
         self.module.functions.push(func);
     }
@@ -771,38 +780,24 @@ impl IRGenerator {
         self.errors.push(err);
     }
 
-    fn push_scope(&mut self) {
-        self.scope_stack.push(IRScope {
-            local_variables: HashMap::new(),
-        });
-    }
-
-    fn pop_scope(&mut self) {
-        self.scope_stack.pop();
-    }
-
     // declaring a local variable includes
     fn decl_local(&mut self, name: String) -> IRLocalVarSlot {
-        if let Some(scope) = self.scope_stack.last_mut() {
-            let slot = scope.local_variables.len();
-            scope.local_variables.insert(name.clone(), slot);
-            slot
-        } else {
-            panic!("No active scope to declare local variable");
-        }
+        let slot = self.current_context_mut().local_variables.len();
+        self.current_context_mut().local_variables.insert(name.clone(), slot);
+        slot
     }
 
     fn find_local(&self, name: &String) -> Option<IRLocalVarSlot> {
-        if let Some(scope) = self.scope_stack.last() {
-            return scope.local_variables.get(name).cloned();
-        }
-        None
+        self.current_context()
+            .local_variables
+            .get(name)
+            .cloned()
     }
 
     fn var_scope(&self, name: &String) -> Option<IRValueScope> {
         // check local scopes from innermost to outermost
         let mut is_first = true;
-        for scope in self.scope_stack.iter().rev() {
+        for scope in self.function_contexts.iter().rev() {
             if scope.local_variables.contains_key(name) {
                 if is_first {
                     return Some(IRValueScope::Local);
@@ -1531,6 +1526,9 @@ impl IRGenerator {
                 elif_branches,
                 else_branch,
             } => {
+                if !elif_branches.is_empty() {
+                    unimplemented!("Elif branches are not supported yet");
+                }
                 self.generate_if_expr(condition, then_branch, else_branch);
             }
             parser::ast::Statement::WhileStmt { condition, body } => {
