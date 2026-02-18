@@ -1,9 +1,16 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use crate::backend::vm::error::VMError;
+use crate::backend::vm::VirtualMachine;
 
-pub type CFunction = fn();
+pub type CFunction = fn(&mut VirtualMachine, usize, usize) -> Result<usize, VMError>;
 
+#[derive(Clone, PartialEq)]
+pub struct LuaTable {
+    pub data: HashMap<LuaValue, LuaValue>,
+    pub metatable: Option<*mut GCObject<LuaTable>>,
+}
 #[repr(C)]
 pub struct HeaderOnly;
 
@@ -25,28 +32,41 @@ pub enum LuaValue {
     Number(f64),
     Boolean(bool),
     String(*mut GCObject<String>),
-    //TODO: 这里的 Table 需要改成一个专门的结构体，包含元表等信息
-    Table(*mut GCObject<HashMap<LuaValue, LuaValue>>),
+    Table(*mut GCObject<LuaTable>),
     Function(*mut GCObject<LFunction>),
+    //TODO: 添加 CFunction 支持, 也就是同时支持lua的全部std, 需要前端修复ir后才可测试
     CFunc(CFunction),
     UserData(*mut std::ffi::c_void),
     TempString(String)
 }
 
+impl LuaValue {
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            LuaValue::Nil => false,
+            LuaValue::Boolean(b) => *b,
+            _ => true,
+        }
+    }
+}
+
 impl Eq for LuaValue {}
 
-impl Hash for LuaValue {
-    fn hash<H: Hasher>(&self, state: &mut H) {
+impl std::hash::Hash for LuaValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match self {
             LuaValue::Nil => (),
-            LuaValue::Number(n) => n.to_bits().hash(state),
+            LuaValue::Number(n) => {
+                let bits = if *n == 0.0 { 0.0f64.to_bits() } else { n.to_bits() };
+                bits.hash(state);
+            }
             LuaValue::Boolean(b) => b.hash(state),
             LuaValue::String(p) => (*p as usize).hash(state),
             LuaValue::Table(p) => (*p as usize).hash(state),
             LuaValue::Function(p) => (*p as usize).hash(state),
-            LuaValue::CFunc(f) => (*f as usize).hash(state),
             LuaValue::UserData(p) => (*p as usize).hash(state),
+            LuaValue::CFunc(f) => (*f as *const () as usize).hash(state),
             LuaValue::TempString(s) => s.hash(state),
         }
     }
@@ -88,6 +108,7 @@ impl fmt::Display for LuaValue {
 
 #[derive(Debug)]
 pub struct LFunction {
+    pub name: String,
     pub opcodes: Vec<crate::common::opcode::OpCode>,
     pub constants: Vec<LuaValue>,
     pub num_locals: usize,

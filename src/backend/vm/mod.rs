@@ -8,24 +8,34 @@
 //            designed the VM register clearing mechanism to support lifetime management and GC-friendliness.
 // 2026-02-17: Introduced the heap and converted string constants into GC-managed string objects;
 //            ensured they are correctly processed and reclaimed during the runtime phase.
-// 2026-02-18: Refined Garbage Collection (GC) and designed the Error Handling System;
-//            implemented a precise Mark-and-Sweep algorithm with type-aware reclamation;
-//            added `ObjectKind` and `size` metadata to GCObject to prevent memory leaks and ensure correct destructor (Drop) execution for Strings and Tables;
-//            integrated an automatic string pool synchronized-cleanup mechanism during the sweep phase to eliminate dangling pointers;
-//            established a comprehensive runtime error hierarchy, covering type errors, undefined variables, stack overflows, and OOM scenarios;
-//            optimized the VM execution loop with integrated GC triggers and register lifetime-based auto-nulling.
+// 2026-02-18: Major Architectural Evolution:
+//            [Dispatch System]: Introduced a decoupled `dispatch` module, centralizing instruction execution logic;
+//            implemented a complete suite of logical comparison opcodes (LT, GT, LE, GE) with full support for Number
+//            and String (lexicographical) operands; established the PC-skip pattern for conditional branching.
+//            [Error Handling & Diagnostics]: Developed a robust Error Handling System with a detailed `VMError` hierarchy;
+//            integrated a "Stack Traceback" mechanism to provide deep-dive diagnostics (#0 to #n frame recovery)
+//            during runtime panics or type mismatches.
+//            [GC & Memory Strategy]: Refined the Mark-and-Sweep algorithm to be type-aware, ensuring explicit
+//            destructor (Drop) execution for Heap-allocated Strings and Tables;
+//            implemented synchronized string-pool cleanup during the sweep phase to prevent dangling pointers;
+//            Optimized performance by deprecating aggressive register auto-nulling in favor of a stable,
+//            frame-level reclamation strategy, resolving critical "Nil" value propagation bugs during cross-instruction execution.
 pub mod dispatch;
+pub mod error;
 pub mod heap;
 pub mod stack;
+mod std_lib;
 
 use crate::backend::translator::emitter::BytecodeEmitter;
 use crate::backend::translator::scanner::{Lifetime, Scanner};
+use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::heap::Heap;
 use crate::backend::vm::stack::StackFrame;
 use crate::common::object::LuaValue;
-use crate::common::opcode::OpCode;
 use crate::common::object::{GCObject, HeaderOnly, ObjectKind};
+use crate::common::opcode::OpCode;
 use crate::frontend::ir::{IRGenerator, IRModule};
+use crate::backend::vm::std_lib::{lua_builtin_print};
 use std::collections::HashMap;
 use std::ops::Index;
 
@@ -35,7 +45,11 @@ pub struct FuncMetadata {
     pub num_locals: usize,
     pub max_stack_size: usize,
     pub reg_metadata: HashMap<usize, Lifetime>,
+    pub child_protos: Vec<String>,
 }
+
+const MAX_CALL_STACK: usize = 1000;
+const HARD_MEMORY_LIMIT: usize = 1024 * 1024 * 512;//512MB
 
 pub struct VirtualMachine {
     pub call_stack: Vec<StackFrame>,
@@ -88,12 +102,16 @@ impl VirtualMachine {
                 bytecode,
                 constants,
                 num_locals,
-                max_stack_size: max_usage,
+                max_stack_size: max_usage + 2,//FIXME:这里的 +2 是为了给函数调用时的返回地址和参数留出空间，后续可以根据实际情况调整
                 reg_metadata: reg_info_map,
+                //FIXME:这里需要irModule实现一个方法来查询每个函数的子函数列表，目前先放一个空的占位符
+                child_protos: Vec::new(),
             };
 
             self.func_meta.insert(func_name.clone(), meta);
         }
+
+        self.load_standard_library();
 
         self.finalize_constants();
 
@@ -107,6 +125,11 @@ impl VirtualMachine {
                 .map(|m| m.max_stack_size)
                 .unwrap_or(0)
         );
+    }
+
+    pub fn load_standard_library(&mut self) {
+        self.globals.insert("print".to_string(), LuaValue::CFunc(lua_builtin_print));
+        //TODO:完成其他标准库注册
     }
 
     fn prepare_entry_frame(&mut self) {
@@ -125,95 +148,122 @@ impl VirtualMachine {
             panic!("[VM 致命错误] 调用栈未初始化。");
         }
         //loop
-        while (!self.call_stack.is_empty()) {
-            // 1. 获取当前栈帧
-            let curr_frame: &mut StackFrame = self.call_stack.last_mut().unwrap();
-            // 2. 根据 PC 获取当前指令
-            let curr_meta = self
-                .func_meta
-                .get(&curr_frame.func_name)
-                .expect("致命错误: 当前函数元数据缺失");
-            let curr_instr = curr_meta
-                .bytecode
-                .get(curr_frame.pc)
-                .expect("致命错误: 当前指令超出范围");
-            // 3. 执行指令（调用 dispatch 模块）
-            //todo: 这里的 dispatch 模块还未实现，后续会根据指令类型进行分发处理，包括算术运算、函数调用、表操作等
+        while !self.call_stack.is_empty() {
+            // 核心步骤：获取当前栈帧和指令，执行指令，并更新 PC
+            let result = self.protected_step();
 
-            // 4. 更新 PC 和寄存器状态
-            curr_frame.pc += 1;
-            self.cleanup_expired_registers();
-            // 5. GC(如果达到条件)
-            if (self.heap.check_gc_condition()) {
+            if let Err(e) = result {
+                self.report_error(e);
+                self.call_stack.clear();
+                return;
+            }
+
+            //GC
+            if self.heap.check_gc_condition() {
                 self.heap.expand_threshold();
-                // 5.1 GC mark
                 self.mark_objects();
-                // 5.2 GC sweep (如果为ture则替换标记为false，如果为flase则回收对象)
                 self.sweep_objects();
             }
-            // =============================================================================
-            // 6. 错误处理机制设计 (Error Handling System)
-            // =============================================================================
-            //
-            // 我们的错误处理分为两个维度：内部崩溃 (Panic) 与 运行时异常 (Runtime Error)。
-            // 具体的错误上下文收集（如函数名、PC、寄存器快照）将在 dispatch 模块执行循环中捕获。
-            //
-            // -----------------------------------------------------------------------------
-            // A. 致命错误 (Panic / Internal Compiler Error)
-            // -----------------------------------------------------------------------------
-            // 这类错误代表 VM 内部状态违背了逻辑预期，通常是编译器实现 Bug 或字节码损坏：
-            // 1. 字节码非法：遇到未定义的 OpCode。
-            // 2. 指令越界：PC 指向了指令集之外的区域。
-            // 3. 栈破坏：寄存器索引超过了该 Frame 预分配的 max_stack_size。
-            // 4. 类型转换失败：在已经通过静态检查或内部保证的操作中，LuaValue 转换失败。
-            // 5. 堆内存污染：解引用到非法的 GCObject 指针（导致宿主 Rust Panic）。
-            //
-            // -----------------------------------------------------------------------------
-            // B. 运行时错误 (Runtime Errors / Managed Errors)
-            // -----------------------------------------------------------------------------
-            // 这类错误由用户编写的脚本逻辑引起，VM 应优雅地拦截并输出调用栈快照 (Traceback)：
-            //
-            // 1. 非函数调用 (Non-callable Error):
-            //    - 场景：尝试对 Number/Table/Nil 执行 CALL 指令。
-            //    - 信息："Attempt to call a non-function value (type: {type}) at PC={pc}"。
-            //
-            // 2. 访问未定义变量 (Undefined Variable):
-            //    - 场景：GETGLOBAL 找不到对应名称，且未配置全局变量缺省值。
-            //    - 信息："Undefined variable '{name}' in function '{func}', PC={pc}"。
-            //
-            // 3. 非法算术/位运算 (Invalid Operation):
-            //    - 场景：String + Table, Number << String 等。
-            //    - 信息："Attempt to perform arithmetic on a {type1} and {type2} value at PC={pc}"。
-            //
-            // 4. 内存耗尽 (OOM - Out of Memory):
-            //    - 场景：Heap 执行 GC 后，total_allocated 依然接近或超过 hard_limit，无法完成 alloc。
-            //    - 信息："Virtual Machine memory limit reached (OOM) during allocation of {size} bytes"。
-            //
-            // 5. 调用栈溢出 (Stack Overflow):
-            //    - 场景：递归调用过深，call_stack.len() > MAX_CALL_STACK_DEPTH。
-            //    - 信息："Stack overflow: maximum call stack size ({limit}) exceeded"。
-            //
-            // -----------------------------------------------------------------------------
-            // C. 错误处理实现思路 (Implementation Strategy)
-            // -----------------------------------------------------------------------------
-            // TODO:
-            // 1. 定义 `enum VMError` 枚举，包装上述运行时错误信息。
-            // 2. 将 `dispatch::run` 的返回值改为 `Result<(), VMError>`。
-            // 3. 在报错发生时，调用 `dump_internal_state()` 并递归 `call_stack` 生成回溯字符串。
-            // 4. 考虑引入 `protected_call` (类似 Lua pcall) 机制，允许脚本捕获异常而不中断 VM。
-            // =============================================================================
         }
+        println!("[VM] 执行完毕，程序正常退出。");
+    }
+    fn protected_step(&mut self) -> Result<(), VMError> {
+        let (func_name, pc) = {
+            let frame = self
+                .call_stack
+                .last()
+                .ok_or_else(|| self.error(ErrorKind::InternalError("调用栈为空".into())))?;
+            (frame.func_name.clone(), frame.pc)
+        };
+
+        let meta = self.func_meta.get(&func_name).ok_or_else(|| {
+            self.error(ErrorKind::InternalError(format!(
+                "找不到函数元数据: {}",
+                func_name
+            )))
+        })?;
+
+        if pc >= meta.bytecode.len() {
+            return Err(self.error(ErrorKind::InternalError(format!(
+                "指令越界: 函数 {} 的 PC={}，但指令总数仅 {}",
+                func_name,
+                pc,
+                meta.bytecode.len()
+            ))));
+        }
+
+        let old_stack_depth = self.call_stack.len();
+
+        let curr_instr = meta.bytecode[pc];
+
+        self.execute_instruction(curr_instr)?;
+
+        // 如果栈深度没变，说明是普通指令或同步的 CFunc，增加 PC
+        // 如果栈深度增加了，说明是 Lua 函数 CALL，新帧的 PC 默认为 0，不需要动
+        // 如果栈深度减少了，说明是 RETURN，原帧已弹出，增加 PC
+        // 假设函数a调用函数b，那么在函数a的帧栈上会执行call并将函数b的帧栈压入容器，
+        // 此时在指令执行后会自增当前函数b的帧栈的PC，但函数a的帧栈的PC不变；
+        // 当函数b执行return时，函数b的帧栈被弹出，此时函数a的帧栈的PC自增，继续执行下一条指令
+        if self.call_stack.len() <= old_stack_depth {
+            if let Some(frame) = self.call_stack.last_mut() {
+                frame.pc += 1;
+            }
+        }
+
+        // 先废弃这个寄存器清理机制
+        // self.cleanup_expired_registers();
+
+        Ok(())
     }
 
+    fn report_error(&self, err: VMError) {
+        let sep = "!".repeat(60);
+        eprintln!("\n{}", sep);
+        eprintln!("  运行时错误: {}", err.kind);
+        eprintln!(
+            "  位置: 函数 '{}'，指令地址 [PC: {:04}]",
+            err.func_name, err.pc
+        );
+        eprintln!("{}", sep);
+        eprintln!("  调用栈回溯 (Stack Traceback):");
+        for (i, frame) in err.stack_trace.iter().enumerate().rev() {
+            eprintln!("    #{} -> {}", i, frame);
+        }
+        eprintln!("{}\n", sep);
+    }
+
+    pub fn error(&self, kind: ErrorKind) -> VMError {
+        let (func_name, pc) = if let Some(frame) = self.call_stack.last() {
+            (frame.func_name.clone(), frame.pc)
+        } else {
+            ("unknown".to_string(), 0)
+        };
+
+        let stack_trace = self
+            .call_stack
+            .iter()
+            .map(|f| f.func_name.clone())
+            .collect();
+
+        VMError {
+            kind,
+            func_name,
+            pc,
+            stack_trace,
+        }
+    }
     #[allow(dead_code)]
     fn cleanup_expired_registers(&mut self) {
         if let Some(frame) = self.call_stack.last_mut() {
             if let Some(meta) = self.func_meta.get(&frame.func_name) {
                 for (&idx, lt) in &meta.reg_metadata {
-                    // 当 PC 到达变量生命周期的终点时，将其设为 Nil 以释放引用, 使 GC 能够回收相关对象
-                    // 如果不这么做，那么该变量的回收必须依赖于后续指令对该寄存器的覆盖，这可能导致 GC 无法及时回收，增加内存压力
-                    if lt.end == frame.pc {
-                        frame.registers[idx] = LuaValue::Nil;
+                    // 修正：只有当 PC 已经走过了生命周期的终点，才设为 Nil
+                    // 这样可以确保在 PC == lt.end 的那条指令执行时，数据依然有效
+                    if frame.pc > lt.end {
+                        // 只有当前不是 Nil 时才操作，减少不必要的赋值
+                        if !matches!(frame.registers[idx], LuaValue::Nil) {
+                            frame.registers[idx] = LuaValue::Nil;
+                        }
                     }
                 }
             }
@@ -276,13 +326,16 @@ impl VirtualMachine {
                             self.heap.string_pool.remove(&(*str_ptr).data);
 
                             let _ = Box::from_raw(str_ptr);
-
                         }
                         ObjectKind::Table => {
-                            let _ = Box::from_raw(p_curr as *mut GCObject<HashMap<LuaValue, LuaValue>>);
+                            let _ = Box::from_raw(
+                                p_curr as *mut GCObject<crate::common::object::LuaTable>,
+                            );
                         }
                         ObjectKind::Function => {
-                            let _ = Box::from_raw(p_curr as *mut GCObject<crate::common::object::LFunction>);
+                            let _ = Box::from_raw(
+                                p_curr as *mut GCObject<crate::common::object::LFunction>,
+                            );
                         }
                     }
 
@@ -295,12 +348,20 @@ impl VirtualMachine {
     unsafe fn mark_value(&self, value: &LuaValue) {
         unsafe {
             match value {
-                LuaValue::String(ptr) => { self.mark_raw(*ptr as *mut GCObject<HeaderOnly>); }
+                LuaValue::String(ptr) => {
+                    self.mark_raw(*ptr as *mut GCObject<HeaderOnly>);
+                }
                 LuaValue::Table(ptr) => {
                     if self.mark_raw(*ptr as *mut GCObject<HeaderOnly>) {
-                        for (k, v) in &(*(*ptr)).data {
+                        let table_inner = &(*(*ptr)).data;
+
+                        for (k, v) in &table_inner.data {
                             self.mark_value(k);
                             self.mark_value(v);
+                        }
+
+                        if let Some(mt_ptr) = table_inner.metatable {
+                            self.mark_value(&LuaValue::Table(mt_ptr));
                         }
                     }
                 }
@@ -374,7 +435,8 @@ impl VirtualMachine {
             for val in &mut meta.constants {
                 if let LuaValue::TempString(_) = val {
                     if let LuaValue::TempString(raw_s) = std::mem::replace(val, LuaValue::Nil) {
-                        let gc_ptr = self.heap.alloc_string(raw_s);
+                        let gc_ptr = self.heap.alloc_string(raw_s)
+                            .expect("[VM] 启动失败：常量池分配内存不足");
                         *val = LuaValue::String(gc_ptr);
                     }
                 }
@@ -382,5 +444,25 @@ impl VirtualMachine {
         }
 
         println!("[VM] 常量池转换完成，进入运行时就绪状态。");
+    }
+
+    fn get_reg(&self, idx: usize) -> &LuaValue {
+        &self.call_stack.last().unwrap().registers[idx]
+    }
+
+    fn set_reg(&mut self, idx: usize, val: LuaValue) {
+        self.call_stack.last_mut().unwrap().registers[idx] = val;
+    }
+
+    fn get_constant(&self, idx: usize) -> &LuaValue {
+        let frame = self.call_stack.last().unwrap();
+        &self.func_meta.get(&frame.func_name).unwrap().constants[idx]
+    }
+
+    fn get_constant_string(&self, idx: usize) -> Result<String, VMError> {
+        match self.get_constant(idx) {
+            LuaValue::String(ptr) => unsafe { Ok((*(*ptr)).data.clone()) },
+            _ => Err(self.error(ErrorKind::InternalError("预期的字符串常量不存在".into()))),
+        }
     }
 }

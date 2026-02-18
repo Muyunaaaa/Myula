@@ -28,6 +28,7 @@ pub struct Scanner {
     pub global_vars: HashSet<String>,
     pub reg_map: HashMap<(String, VarKind), usize>,
     pub func_stack_info: HashMap<String, (usize, usize)>,
+    pub child_protos: HashMap<String, Vec<String>>,
     instr_count: usize,
 }
 
@@ -38,6 +39,7 @@ impl Scanner {
             global_vars: HashSet::new(),
             reg_map: HashMap::new(),
             func_stack_info: HashMap::new(),
+            child_protos: HashMap::new(),
             instr_count: 0,
         }
     }
@@ -118,9 +120,6 @@ impl Scanner {
 
     fn process_instr(&mut self, func_name: &str, instr: &IRInstruction) {
         match instr {
-            IRInstruction::FnProto { dest, .. } => {
-                self.record_def(func_name, VarKind::Reg(*dest), false, Some("Function"));
-            }
             IRInstruction::LoadImm { dest, value } => {
                 let type_str = match value {
                     IROperand::ImmFloat(_) => "Float",

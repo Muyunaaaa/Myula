@@ -1,12 +1,19 @@
 // Myula compiler heap
 // Created by: Yuyang Feng <mu_yunaaaa@mail.nwpu.edu.cn>
 // Changelog:
-// 2026-2-17: Initial implementation of Heap with string interning and basic GC object management; added alloc_string method to manage string objects and maintain a string pool for efficient memory usage and quick lookups.
-// 2026-02-18: Refactored Heap with precise memory tracking and type-aware allocation;
-//            introduced specialized allocators: `alloc_table` and `alloc_function` to handle complex heap objects;
-//            added `ObjectKind` and `size` fields to GCObject to support polymorphic deallocation during GC;
-//            implemented accurate memory usage estimation by including capacities of internal containers (String, HashMap, Vec);
-//            added GC trigger logic (`check_gc_condition`) and dynamic threshold scaling to balance performance and memory pressure.
+// 2026-02-17: Initial implementation of Heap with string interning and basic GC object management; 
+//            added alloc_string method to manage string objects and maintain a string pool for efficient 
+//            memory usage and quick lookups.
+// 2026-02-18: Major Memory Management & Type-Aware Evolution:
+//            [Polymorphic Allocation]: Introduced specialized allocators `alloc_table` and `alloc_function`, 
+//            supporting the instantiation of complex heap objects beyond raw strings;
+//            [Precise Memory Tracking]: Implemented a sophisticated memory accounting system that calculates 
+//            not just struct sizes, but the heap-allocated capacity of internal containers (String data, 
+//            HashMap buckets, and OpCode/Constant vectors);
+//            [GC Control Logic]: Integrated `check_gc_condition` and `expand_threshold` to implement a 
+//            dynamic GC triggering mechanism, providing a balance between memory footprint and execution throughput;
+//            [Memory Safety]: Added a hard memory limit check (HARD_MEMORY_LIMIT) within `alloc_raw_object` 
+//            to provide an ultimate safeguard against OOM scenarios in the VM runtime.
 use crate::common::object::{GCObject, HeaderOnly, ObjectKind, LFunction, LuaValue};
 use std::collections::HashMap;
 
@@ -27,55 +34,41 @@ impl Heap {
         }
     }
 
-    pub fn alloc_string(&mut self, s: String) -> *mut GCObject<String> {
+    pub fn alloc_string(&mut self, s: String) -> Option<*mut GCObject<String>> {
         if let Some(&ptr) = self.string_pool.get(&s) {
-            return ptr;
+            return Some(ptr);
         }
 
-        let extra_mem = s.capacity(); // 字符串内部缓冲区的内存
+        let extra_mem = s.capacity();
         let total_size = std::mem::size_of::<GCObject<String>>() + extra_mem;
 
-        let obj = GCObject {
-            mark: false,
-            kind: ObjectKind::String,
-            size: total_size,
-            next: self.all_objects,
-            data: s.clone(),
-        };
+        if let Some(ptr) = self.alloc_raw_object(s.clone(), ObjectKind::String, total_size) {
+            self.string_pool.insert(s, ptr);
+            Some(ptr)
+        } else {
+            None
+        }
+    }
+    pub fn alloc_table(&mut self, table_data: crate::common::object::LuaTable) -> Option<*mut GCObject<crate::common::object::LuaTable>> {
+        let size = std::mem::size_of::<GCObject<crate::common::object::LuaTable>>()
+            + table_data.data.capacity() * std::mem::size_of::<(LuaValue, LuaValue)>();
 
-        let boxed = Box::new(obj);
-        let ptr = Box::into_raw(boxed);
-
-        self.all_objects = ptr as *mut GCObject<HeaderOnly>;
-
-        self.string_pool.insert(s, ptr);
-
-        ptr
+        self.alloc_raw_object(table_data, ObjectKind::Table, size)
     }
 
-    pub fn alloc_table(&mut self, data: HashMap<LuaValue, LuaValue>) -> *mut GCObject<HashMap<LuaValue, LuaValue>> {
-        // size = GCObject 结构体大小 + HashMap 桶占用的粗略内存
-        // HashMap 的内部节点动态分配较难精确统计，此处以 capacity 估算
-        let size = std::mem::size_of::<GCObject<HashMap<LuaValue, LuaValue>>>()
-            + data.capacity() * std::mem::size_of::<(LuaValue, LuaValue)>();
-
-        let ptr = self.alloc_raw_object(data, ObjectKind::Table, size);
-        self.total_allocated += size;
-        ptr
-    }
-
-    pub fn alloc_function(&mut self, data: LFunction) -> *mut GCObject<LFunction> {
-        // size = 结构体大小 + 指令集和常量池的堆内存
+    pub fn alloc_function(&mut self, data: LFunction) -> Option<*mut GCObject<LFunction>> {
         let size = std::mem::size_of::<GCObject<LFunction>>()
             + data.opcodes.capacity() * std::mem::size_of::<crate::common::opcode::OpCode>()
             + data.constants.capacity() * std::mem::size_of::<LuaValue>();
 
-        let ptr = self.alloc_raw_object(data, ObjectKind::Function, size);
-        self.total_allocated += size;
-        ptr
+        self.alloc_raw_object(data, ObjectKind::Function, size)
     }
 
-    fn alloc_raw_object<T>(&mut self, data: T, kind: ObjectKind, size: usize) -> *mut GCObject<T> {
+    fn alloc_raw_object<T>(&mut self, data: T, kind: ObjectKind, size: usize) -> Option<*mut GCObject<T>> {
+        if self.total_allocated + size > crate::backend::vm::HARD_MEMORY_LIMIT {
+            return None;
+        }
+
         let obj = GCObject {
             mark: false,
             kind,
@@ -86,7 +79,10 @@ impl Heap {
         let boxed = Box::new(obj);
         let ptr = Box::into_raw(boxed);
         self.all_objects = ptr as *mut GCObject<HeaderOnly>;
-        ptr
+
+        self.total_allocated += size;
+
+        Some(ptr)
     }
 
     pub fn check_gc_condition(&mut self) -> bool{

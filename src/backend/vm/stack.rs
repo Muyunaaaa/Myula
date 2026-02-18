@@ -18,3 +18,15 @@ impl StackFrame {
         }
     }
 }
+
+impl StackFrame {
+    #[inline(always)]
+    pub fn get_reg(&self, idx: usize) -> &LuaValue {
+        &self.registers[idx]
+    }
+
+    #[inline(always)]
+    pub fn set_reg(&mut self, idx: usize, val: LuaValue) {
+        self.registers[idx] = val;
+    }
+}
