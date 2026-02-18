@@ -3,111 +3,116 @@ use crate::backend::vm::VirtualMachine;
 use crate::common::object::LuaValue;
 
 impl VirtualMachine {
-    pub fn handle_compare<F>(&mut self, left: u16, right: u16, op: F) -> Result<(), VMError>
+    // 核心通用比较处理函数
+    pub fn handle_compare<F>(&mut self, dest: u16, left: u16, right: u16, op: F) -> Result<(), VMError>
     where F: Fn(&LuaValue, &LuaValue) -> bool
     {
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
 
-        if !op(v1, v2) {
+        let res = op(v1, v2);
+
+        self.set_reg(dest as usize, LuaValue::Boolean(res));
+
+        if !res {
             let frame = self.call_stack.last_mut().unwrap();
-            frame.pc += 1;//通常比较指令后面会跟一个条件跳转指令，如果比较结果不满足条件，就跳过下一条指令
+            frame.pc += 1;
         }
         Ok(())
     }
 
-    /// EQ: R[left] == R[right]
-    pub fn handle_eq(&mut self, left: u16, right: u16) -> Result<(), VMError> {
-        self.handle_compare(left, right, |a, b| a == b)
+    /// EQ: R[dest] = (R[left] == R[right])
+    pub fn handle_eq(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.handle_compare(dest, left, right, |a, b| a == b)
     }
 
-    /// NE: R[left] != R[right]
-    pub fn handle_ne(&mut self, left: u16, right: u16) -> Result<(), VMError> {
-        self.handle_compare(left, right, |a, b| a != b)
+    /// NE: R[dest] = (R[left] != R[right])
+    pub fn handle_ne(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.handle_compare(dest, left, right, |a, b| a != b)
     }
 
-    /// LT: R[left] < R[right]
-    pub fn handle_lt(&mut self, left: u16, right: u16) -> Result<(), VMError> {
+    /// LT: R[dest] = (R[left] < R[right])
+    pub fn handle_lt(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
 
-        match (v1, v2) {
-            (LuaValue::Number(n1), LuaValue::Number(n2)) => {
-                if !(n1 < n2) { self.call_stack.last_mut().unwrap().pc += 1; }
-                Ok(())
-            }
+        let res = match (v1, v2) {
+            (LuaValue::Number(n1), LuaValue::Number(n2)) => n1 < n2,
             (LuaValue::String(s1), LuaValue::String(s2)) => unsafe {
-                if !((*(*s1)).data < (*(*s2)).data) { self.call_stack.last_mut().unwrap().pc += 1; }
-                Ok(())
-            }
-            _ => Err(self.error(ErrorKind::TypeError(format!(
+                (*(*s1)).data < (*(*s2)).data
+            },
+            _ => return Err(self.error(ErrorKind::TypeError(format!(
                 "TypeMismatchException: relational operator '<' is not defined between '{:?}' and '{:?}'",
                 v1, v2
             )))),
-        }
+        };
+
+        self.set_reg(dest as usize, LuaValue::Boolean(res));
+        if !res { self.call_stack.last_mut().unwrap().pc += 1; }
+        Ok(())
     }
 
-    /// GT: R[left] > R[right]
-    pub fn handle_gt(&mut self, left: u16, right: u16) -> Result<(), VMError> {
+    /// GT: R[dest] = (R[left] > R[right])
+    pub fn handle_gt(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
 
-        match (v1, v2) {
-            (LuaValue::Number(n1), LuaValue::Number(n2)) => {
-                if !(n1 > n2) { self.call_stack.last_mut().unwrap().pc += 1; }
-                Ok(())
-            }
+        let res = match (v1, v2) {
+            (LuaValue::Number(n1), LuaValue::Number(n2)) => n1 > n2,
             (LuaValue::String(s1), LuaValue::String(s2)) => unsafe {
-                if !((*(*s1)).data > (*(*s2)).data) { self.call_stack.last_mut().unwrap().pc += 1; }
-                Ok(())
-            }
-            _ => Err(self.error(ErrorKind::TypeError(format!(
+                (*(*s1)).data > (*(*s2)).data
+            },
+            _ => return Err(self.error(ErrorKind::TypeError(format!(
                 "TypeMismatchException: relational operator '>' is not defined between '{:?}' and '{:?}'",
                 v1, v2
             )))),
-        }
+        };
+
+        self.set_reg(dest as usize, LuaValue::Boolean(res));
+        if !res { self.call_stack.last_mut().unwrap().pc += 1; }
+        Ok(())
     }
 
-    /// LE: R[left] <= R[right]
-    pub fn handle_le(&mut self, left: u16, right: u16) -> Result<(), VMError> {
+    /// LE: R[dest] = (R[left] <= R[right])
+    pub fn handle_le(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
 
-        match (v1, v2) {
-            (LuaValue::Number(n1), LuaValue::Number(n2)) => {
-                if !(n1 <= n2) { self.call_stack.last_mut().unwrap().pc += 1; }
-                Ok(())
-            }
+        let res = match (v1, v2) {
+            (LuaValue::Number(n1), LuaValue::Number(n2)) => n1 <= n2,
             (LuaValue::String(s1), LuaValue::String(s2)) => unsafe {
-                if !((*(*s1)).data <= (*(*s2)).data) { self.call_stack.last_mut().unwrap().pc += 1; }
-                Ok(())
-            }
-            _ => Err(self.error(ErrorKind::TypeError(format!(
+                (*(*s1)).data <= (*(*s2)).data
+            },
+            _ => return Err(self.error(ErrorKind::TypeError(format!(
                 "TypeMismatchException: relational operator '<=' is not defined between '{:?}' and '{:?}'",
                 v1, v2
             )))),
-        }
+        };
+
+        self.set_reg(dest as usize, LuaValue::Boolean(res));
+        if !res { self.call_stack.last_mut().unwrap().pc += 1; }
+        Ok(())
     }
 
-    /// GE: R[left] >= R[right]
-    pub fn handle_ge(&mut self, left: u16, right: u16) -> Result<(), VMError> {
+    /// GE: R[dest] = (R[left] >= R[right])
+    pub fn handle_ge(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
 
-        match (v1, v2) {
-            (LuaValue::Number(n1), LuaValue::Number(n2)) => {
-                if !(n1 >= n2) { self.call_stack.last_mut().unwrap().pc += 1; }
-                Ok(())
-            }
+        let res = match (v1, v2) {
+            (LuaValue::Number(n1), LuaValue::Number(n2)) => n1 >= n2,
             (LuaValue::String(s1), LuaValue::String(s2)) => unsafe {
-                if !((*(*s1)).data >= (*(*s2)).data) { self.call_stack.last_mut().unwrap().pc += 1; }
-                Ok(())
-            }
-            _ => Err(self.error(ErrorKind::TypeError(format!(
+                (*(*s1)).data >= (*(*s2)).data
+            },
+            _ => return Err(self.error(ErrorKind::TypeError(format!(
                 "TypeMismatchException: relational operator '>=' is not defined between '{:?}' and '{:?}'",
                 v1, v2
             )))),
-        }
+        };
+
+        self.set_reg(dest as usize, LuaValue::Boolean(res));
+        if !res { self.call_stack.last_mut().unwrap().pc += 1; }
+        Ok(())
     }
 
     /// TEST: 检查 R[reg] 是否为“真”

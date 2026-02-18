@@ -10,7 +10,7 @@ mod register_allocation_visualizer {
     #[test]
     fn test_lua_file_allocation_visualization() {
         // ================= 配置区域 =================
-        let file_path = "lua_tests/deep_test.lua";
+        let file_path = "./lua_tests/self/02_string_gc.lua";
         // ===========================================
 
         if !Path::new(file_path).exists() {

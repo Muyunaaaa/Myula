@@ -83,15 +83,15 @@ impl<'a> BytecodeEmitter<'a> {
                     IRBinOp::Concat => self.bytecode.push(OpCode::Concat { dest: d, left: l, right: r }),
                     IRBinOp::And => self.bytecode.push(OpCode::And { dest: d, left: l, right: r }),
                     IRBinOp::Or => self.bytecode.push(OpCode::Or { dest: d, left: l, right: r }),
-                    IRBinOp::Eq => self.bytecode.push(OpCode::Eq { left: l, right: r }),
-                    IRBinOp::Neq => self.bytecode.push(OpCode::Ne { left: l, right: r }),
-                    IRBinOp::Lt => self.bytecode.push(OpCode::Lt { left: l, right: r }),
-                    IRBinOp::Gt => self.bytecode.push(OpCode::Gt { left: l, right: r }),
-                    IRBinOp::Leq => self.bytecode.push(OpCode::Le { left: l, right: r }),
-                    IRBinOp::Geq => self.bytecode.push(OpCode::Ge { left: l, right: r }),
+
+                    IRBinOp::Eq  => self.bytecode.push(OpCode::Eq { dest: d, left: l, right: r }),
+                    IRBinOp::Neq => self.bytecode.push(OpCode::Ne { dest: d, left: l, right: r }),
+                    IRBinOp::Lt  => self.bytecode.push(OpCode::Lt { dest: d, left: l, right: r }),
+                    IRBinOp::Gt  => self.bytecode.push(OpCode::Gt { dest: d, left: l, right: r }),
+                    IRBinOp::Leq => self.bytecode.push(OpCode::Le { dest: d, left: l, right: r }),
+                    IRBinOp::Geq => self.bytecode.push(OpCode::Ge { dest: d, left: l, right: r }),
                 }
             }
-
             IRInstruction::Unary { dest, src, operator } => {
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
                 let s = self.get_reg_index(src);

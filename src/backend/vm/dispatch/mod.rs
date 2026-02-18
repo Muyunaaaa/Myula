@@ -36,12 +36,12 @@ impl VirtualMachine {
 
             OpCode::FnProto { dest, proto_idx } => self.handle_fn_proto(dest, proto_idx),
 
-            OpCode::Eq { left, right } => self.handle_eq(left, right),
-            OpCode::Ne { left, right } => self.handle_ne(left, right),
-            OpCode::Lt { left, right } => self.handle_lt(left, right),
-            OpCode::Gt { left, right } => self.handle_gt(left, right),
-            OpCode::Le { left, right } => self.handle_le(left, right),
-            OpCode::Ge { left, right } => self.handle_ge(left, right),
+            OpCode::Eq { dest, left, right } => self.handle_eq(dest, left, right),
+            OpCode::Ne { dest, left, right } => self.handle_ne(dest, left, right),
+            OpCode::Lt { dest, left, right } => self.handle_lt(dest, left, right),
+            OpCode::Gt { dest, left, right } => self.handle_gt(dest, left, right),
+            OpCode::Le { dest, left, right } => self.handle_le(dest, left, right),
+            OpCode::Ge { dest, left, right } => self.handle_ge(dest, left, right),
 
             OpCode::Test { reg } => self.handle_test(reg),
             OpCode::Jump { offset } => self.handle_jump(offset),
