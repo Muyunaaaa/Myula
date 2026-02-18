@@ -7,6 +7,7 @@
 //      26-02-11: Added function call and indexing parsing
 //      26-02-11: Added function declaration parsing
 //      26-02-13: Added table constructor parsing and member access parsing
+//      26-02-18: Added concat operator parsing
 
 pub mod ast;
 
@@ -110,10 +111,10 @@ impl Parser<'_> {
             | ast::BinOp::Gt
             | ast::BinOp::Leq
             | ast::BinOp::Geq => Some(3),
-            ast::BinOp::Add | ast::BinOp::Sub => Some(4),
-            ast::BinOp::Mul | ast::BinOp::Div => Some(5),
-            ast::BinOp::Pow => Some(6),
-            _ => None,
+            ast::BinOp::Concat => Some(4),
+            ast::BinOp::Add | ast::BinOp::Sub => Some(5),
+            ast::BinOp::Mul | ast::BinOp::Div => Some(6),
+            ast::BinOp::Pow => Some(7),
         }
     }
 
