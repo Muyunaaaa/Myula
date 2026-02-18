@@ -37,6 +37,7 @@ use crate::common::opcode::OpCode;
 use crate::frontend::ir::{IRGenerator, IRModule};
 use crate::backend::vm::std_lib::{lua_builtin_print};
 use std::collections::HashMap;
+use std::io::Write;
 use std::ops::Index;
 
 pub struct FuncMetadata {
@@ -72,6 +73,7 @@ impl VirtualMachine {
 
     /// IR 扫描 -> 寄存器分配 -> 字节码生成 -> 入口帧准备
     pub fn init(&mut self, generator: &IRGenerator) {
+        println!("[DEBUG] Starting scanner..."); std::io::stdout().flush().unwrap();
         self.module = generator.get_module().clone();
 
         let mut scanner = Scanner::new();
@@ -201,19 +203,24 @@ impl VirtualMachine {
 
         let curr_instr = meta.bytecode[pc];
 
+        // // --- 新增调试打印开始 ---
+        // print!("[TRACE] {:<10} | PC: {:03} | Instr: {:<20} | ", func_name, pc, format!("{:?}", curr_instr));
+        // std::io::stdout().flush().unwrap();
+        //
+        // // 打印当前活跃寄存器状态 (前 8 个通常足够看到循环变量)
+        // let frame = self.call_stack.last().unwrap();
+        // print!("Regs: ");
+        // for i in 0..8 {
+        //     if i < frame.registers.len() {
+        //         print!("R{}:{:?} ", i, frame.registers[i]);
+        //     }
+        // }
+        // println!();
+        // // --- 新增调试打印结束 ---
+
         self.execute_instruction(curr_instr)?;
 
-        // 如果栈深度没变，说明是普通指令或同步的 CFunc，增加 PC
-        // 如果栈深度增加了，说明是 Lua 函数 CALL，新帧的 PC 默认为 0，不需要动
-        // 如果栈深度减少了，说明是 RETURN，原帧已弹出，增加 PC
-        // 假设函数a调用函数b，那么在函数a的帧栈上会执行call并将函数b的帧栈压入容器，
-        // 此时在指令执行后会自增当前函数b的帧栈的PC，但函数a的帧栈的PC不变；
-        // 当函数b执行return时，函数b的帧栈被弹出，此时函数a的帧栈的PC自增，继续执行下一条指令
-        if self.call_stack.len() <= old_stack_depth {
-            if let Some(frame) = self.call_stack.last_mut() {
-                frame.pc += 1;
-            }
-        }
+        // 不在这里统一将pc加1，而是让每条指令的处理函数根据需要自行调整PC（例如跳转指令会直接修改PC，而普通指令则在执行完后自动加1）
 
         // 先废弃这个寄存器清理机制
         // self.cleanup_expired_registers();

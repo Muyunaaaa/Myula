@@ -22,6 +22,8 @@ pub struct BytecodeEmitter<'a> {
     bytecode: Vec<OpCode>,
     const_map: HashMap<LuaValue, u16>,
     var_literals: HashMap<usize, IROperand>,
+    block_offsets: HashMap<usize, usize>,
+    pending_jumps: Vec<(usize, usize)>,
 }
 
 impl<'a> BytecodeEmitter<'a> {
@@ -33,19 +35,33 @@ impl<'a> BytecodeEmitter<'a> {
             bytecode: Vec::new(),
             const_map: HashMap::new(),
             var_literals: HashMap::new(),
+            block_offsets: HashMap::new(),
+            pending_jumps: Vec::new(),
         }
     }
 
     pub fn emit(mut self) -> (Vec<OpCode>, Vec<LuaValue>) {
         for block in &self.func_ir.basic_blocks {
+            self.block_offsets.insert(block.id, self.bytecode.len());
+
             for instr in &block.instructions {
                 self.emit_instr(instr);
             }
             self.emit_terminator(&block.terminator);
         }
+
+        for (instr_pc, target_id) in self.pending_jumps.iter() {
+            if let Some(&target_pc) = self.block_offsets.get(target_id) {
+                let offset = (target_pc as i32) - (*instr_pc as i32);
+
+                if let Some(OpCode::Jump { offset: off }) = self.bytecode.get_mut(*instr_pc) {
+                    *off = offset;
+                }
+            }
+        }
+
         (self.bytecode, self.constants)
     }
-
     fn emit_instr(&mut self, instr: &IRInstruction) {
         match instr {
             IRInstruction::LoadImm { dest, value } => {
@@ -143,7 +159,9 @@ impl<'a> BytecodeEmitter<'a> {
                     self.bytecode.push(OpCode::Move { dest: r_func + 1 + i as u16, src: r_src });
                 }
                 self.bytecode.push(OpCode::Call { func_reg: r_func, argc: args.len() as u8, retc: 1 });
-                self.bytecode.push(OpCode::Move { dest: r_dest, src: r_func });
+                if r_dest != r_func {
+                    self.bytecode.push(OpCode::Move { dest: r_dest, src: r_func });
+                }
             }
 
             IRInstruction::LoadGlobal { dest, name } => {
@@ -166,7 +184,9 @@ impl<'a> BytecodeEmitter<'a> {
                 let s = self.get_reg_index(src);
                 self.bytecode.push(OpCode::SetGlobal { name_idx, src: s });
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
-                self.bytecode.push(OpCode::Move { dest: d, src: s });
+                if d != s {
+                    self.bytecode.push(OpCode::Move { dest: d, src: s });
+                }
             }
 
             IRInstruction::LoadLocal { dest, src } => {
@@ -183,7 +203,9 @@ impl<'a> BytecodeEmitter<'a> {
                     let val = self.get_reg_index(src);
                     self.bytecode.push(OpCode::Move { dest: slot, src: val });
                     let d = self.get_phys_reg(VarKind::Reg(*dest));
-                    self.bytecode.push(OpCode::Move { dest: d, src: val });
+                    if d != val {
+                        self.bytecode.push(OpCode::Move { dest: d, src: val });
+                    }
                 }
             }
             _ => {}
@@ -201,14 +223,23 @@ impl<'a> BytecodeEmitter<'a> {
                     self.bytecode.push(OpCode::Return { start: 0, count: 0 });
                 }
             }
-            IRTerminator::Branch { cond, .. } => {
-                let r_cond = self.get_reg_index(cond);
-                self.bytecode.push(OpCode::Test { reg: r_cond });
+            IRTerminator::Jump(target_id) => {
+                let current_pc = self.bytecode.len();
                 self.bytecode.push(OpCode::Jump { offset: 0 });
-                self.bytecode.push(OpCode::Jump { offset: 0 });
+                self.pending_jumps.push((current_pc, *target_id));
             }
-            IRTerminator::Jump(_) => {
+            IRTerminator::Branch { cond, br_true, br_false } => {
+                let r_cond = self.get_reg_index(cond);
+
+                self.bytecode.push(OpCode::Test { reg: r_cond });
+
+                let true_jmp_pc = self.bytecode.len();
                 self.bytecode.push(OpCode::Jump { offset: 0 });
+                self.pending_jumps.push((true_jmp_pc, *br_true));
+
+                let false_jmp_pc = self.bytecode.len();
+                self.bytecode.push(OpCode::Jump { offset: 0 });
+                self.pending_jumps.push((false_jmp_pc, *br_false));
             }
             _ => {}
         }

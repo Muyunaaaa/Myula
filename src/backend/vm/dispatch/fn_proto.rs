@@ -4,6 +4,7 @@ use crate::common::object::LuaValue;
 
 impl VirtualMachine {
     pub fn handle_fn_proto(&mut self, dest: u16, proto_idx: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let curr_frame = self.call_stack.last().unwrap();
 
         let curr_meta = self.func_meta.get(&curr_frame.func_name)

@@ -6,21 +6,26 @@ use crate::common::opcode::UnaryOpType;
 impl VirtualMachine {
     /// ADD: R[dest] = R[left] + R[right]
     pub fn handle_add(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         self.handle_binary_op(dest, left, right, |n1, n2| n1 + n2, "addition")
+
     }
 
     /// SUB: R[dest] = R[left] - R[right]
     pub fn handle_sub(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         self.handle_binary_op(dest, left, right, |n1, n2| n1 - n2, "subtraction")
     }
 
     /// MUL: R[dest] = R[left] * R[right]
     pub fn handle_mul(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         self.handle_binary_op(dest, left, right, |n1, n2| n1 * n2, "multiplication")
     }
 
     /// DIV: R[dest] = R[left] / R[right]
     pub fn handle_div(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let v2 = self.get_reg(right as usize);
         if let LuaValue::Number(n2) = v2 {
             if *n2 == 0.0 {
@@ -34,6 +39,7 @@ impl VirtualMachine {
 
     /// UNOP
     pub fn handle_unary_op(&mut self, dest: u16, src: u16, op: UnaryOpType) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let val = self.get_reg(src as usize).clone();
 
         let res = match op {
@@ -100,6 +106,7 @@ impl VirtualMachine {
 
     /// AND: R[dest] = R[left] and R[right]
     pub fn handle_and(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let v1 = self.get_reg(left as usize).clone();
         let res = if !v1.is_truthy() {
             v1
@@ -112,6 +119,7 @@ impl VirtualMachine {
 
     /// OR: R[dest] = R[left] or R[right]
     pub fn handle_or(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let v1 = self.get_reg(left as usize).clone();
         let res = if v1.is_truthy() {
             v1
@@ -123,6 +131,7 @@ impl VirtualMachine {
     }
 
     pub fn handle_concat(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let v1 = self.get_reg(left as usize).clone();
         let v2 = self.get_reg(right as usize).clone();
 

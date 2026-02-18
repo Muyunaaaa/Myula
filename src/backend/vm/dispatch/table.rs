@@ -6,6 +6,7 @@ use crate::common::object::LuaValue;
 impl VirtualMachine {
     /// NEWTABLE: 创建新表 R[dest] = {}
     pub fn handle_new_table(&mut self, dest: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let new_table = crate::common::object::LuaTable {
             data: HashMap::new(),
             metatable: None,
@@ -20,6 +21,7 @@ impl VirtualMachine {
 
     /// SETTABLE: R[t_reg][R[k_reg]] = R[v_reg]
     pub fn handle_set_table(&mut self, t_reg: u16, k_reg: u16, v_reg: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let table_val = self.get_reg(t_reg as usize).clone();
         let key = self.get_reg(k_reg as usize).clone();
         let val = self.get_reg(v_reg as usize).clone();
@@ -45,6 +47,7 @@ impl VirtualMachine {
 
     /// GETTABLE: R[dest] = R[t_reg][R[k_reg]]
     pub fn handle_get_table(&mut self, dest: u16, t_reg: u16, k_reg: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let table_val = self.get_reg(t_reg as usize).clone();
         let key = self.get_reg(k_reg as usize).clone();
 

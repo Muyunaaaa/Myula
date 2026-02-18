@@ -7,21 +7,15 @@ impl VirtualMachine {
     /// JUMP
     pub fn handle_jump(&mut self, offset: i32) -> Result<(), VMError> {
         let frame = self.call_stack.last_mut().unwrap();
-        // 因为 run 循环末尾会自动 pc += 1，所以这里的跳转逻辑需要微调
-        // 如果 offset 为 0，实际上是执行下一条指令
-        // 我们通过 (offset - 1) 来抵消循环中的自增，或者直接修改 PC
         let new_pc = (frame.pc as i32 + offset) as usize;
         frame.pc = new_pc;
-
-        // 由于 run 循环中有 curr_frame.pc += 1，
-        // 我们在此处设置 PC 后，循环末尾会再次加 1。
-        // 为了抵消，我们将设置的值减去 1（假设指令是相对于当前指令计算的）。
-        frame.pc = (frame.pc as i32 - 1).max(0) as usize;
+        frame.pc = (frame.pc as i32).max(0) as usize;
         Ok(())
     }
 
     /// CALL
     pub fn handle_call(&mut self, func_reg: u16, argc: u8, retc: u8) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let func_val = self.get_reg(func_reg as usize).clone();
 
         if self.call_stack.len() >= crate::backend::vm::MAX_CALL_STACK {
@@ -99,9 +93,6 @@ impl VirtualMachine {
         if self.call_stack.is_empty() {
             return Ok(());
         }
-
-        //把 PC 调整回调用指令的位置，确保返回后继续执行下一条指令
-        self.call_stack.last_mut().unwrap().pc -= 1;
 
         if let Some(dest_idx) = current_frame.ret_dest {
             if let Some(caller_frame) = self.call_stack.last_mut() {

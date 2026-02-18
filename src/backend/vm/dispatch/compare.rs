@@ -3,7 +3,6 @@ use crate::backend::vm::VirtualMachine;
 use crate::common::object::LuaValue;
 
 impl VirtualMachine {
-    // 核心通用比较处理函数
     pub fn handle_compare<F>(&mut self, dest: u16, left: u16, right: u16, op: F) -> Result<(), VMError>
     where F: Fn(&LuaValue, &LuaValue) -> bool
     {
@@ -14,25 +13,24 @@ impl VirtualMachine {
 
         self.set_reg(dest as usize, LuaValue::Boolean(res));
 
-        if !res {
-            let frame = self.call_stack.last_mut().unwrap();
-            frame.pc += 1;
-        }
         Ok(())
     }
 
     /// EQ: R[dest] = (R[left] == R[right])
     pub fn handle_eq(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         self.handle_compare(dest, left, right, |a, b| a == b)
     }
 
     /// NE: R[dest] = (R[left] != R[right])
     pub fn handle_ne(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         self.handle_compare(dest, left, right, |a, b| a != b)
     }
 
     /// LT: R[dest] = (R[left] < R[right])
     pub fn handle_lt(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
 
@@ -48,12 +46,12 @@ impl VirtualMachine {
         };
 
         self.set_reg(dest as usize, LuaValue::Boolean(res));
-        if !res { self.call_stack.last_mut().unwrap().pc += 1; }
         Ok(())
     }
 
     /// GT: R[dest] = (R[left] > R[right])
     pub fn handle_gt(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
 
@@ -69,12 +67,12 @@ impl VirtualMachine {
         };
 
         self.set_reg(dest as usize, LuaValue::Boolean(res));
-        if !res { self.call_stack.last_mut().unwrap().pc += 1; }
         Ok(())
     }
 
     /// LE: R[dest] = (R[left] <= R[right])
     pub fn handle_le(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
 
@@ -90,12 +88,12 @@ impl VirtualMachine {
         };
 
         self.set_reg(dest as usize, LuaValue::Boolean(res));
-        if !res { self.call_stack.last_mut().unwrap().pc += 1; }
         Ok(())
     }
 
     /// GE: R[dest] = (R[left] >= R[right])
     pub fn handle_ge(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
 
@@ -111,7 +109,6 @@ impl VirtualMachine {
         };
 
         self.set_reg(dest as usize, LuaValue::Boolean(res));
-        if !res { self.call_stack.last_mut().unwrap().pc += 1; }
         Ok(())
     }
 
@@ -121,6 +118,9 @@ impl VirtualMachine {
         let val = self.get_reg(reg as usize);
 
         if !val.is_truthy() {
+            let frame = self.call_stack.last_mut().unwrap();
+            frame.pc += 2;
+        }else{
             let frame = self.call_stack.last_mut().unwrap();
             frame.pc += 1;
         }
