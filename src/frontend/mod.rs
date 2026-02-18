@@ -50,6 +50,7 @@ mod tests {
         print(tbl.a)
         print(tbl[\"b\"])
         print(tbl[1])
+        print(\"123\" .. \"456\")
         ",
         );
         let mut parser = Parser::new(&mut lexer);
