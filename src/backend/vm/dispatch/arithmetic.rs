@@ -24,7 +24,9 @@ impl VirtualMachine {
         let v2 = self.get_reg(right as usize);
         if let LuaValue::Number(n2) = v2 {
             if *n2 == 0.0 {
-                return Err(self.error(ErrorKind::ArithmeticError("division by zero".into())));
+                return Err(self.error(ErrorKind::ArithmeticError(
+                    "ArithmeticException: division by zero".into()
+                )));
             }
         }
         self.handle_binary_op(dest, left, right, |n1, n2| n1 / n2, "division")
@@ -39,7 +41,10 @@ impl VirtualMachine {
                 if let LuaValue::Number(n) = val {
                     LuaValue::Number(-n)
                 } else {
-                    return Err(self.error(ErrorKind::TypeError(format!("attempt to negate a {:?}", val))));
+                    return Err(self.error(ErrorKind::TypeError(format!(
+                        "TypeMismatchException: operator '-' is not defined for type '{:?}'",
+                        val
+                    ))));
                 }
             }
             UnaryOpType::Not => {
@@ -57,7 +62,12 @@ impl VirtualMachine {
                         let table_data = &(*ptr).data.data;
                         LuaValue::Number(table_data.len() as f64)
                     },
-                    _ => return Err(self.error(ErrorKind::TypeError(format!("attempt to get length of a {:?}", val)))),
+                    _ => {
+                        return Err(self.error(ErrorKind::TypeError(format!(
+                            "TypeMismatchException: operation '#' (len) is not defined for type '{:?}'",
+                            val
+                        ))));
+                    }
                 }
             }
         };
@@ -79,7 +89,10 @@ impl VirtualMachine {
             }
             //TODO: 后续支持Table和String的加法等
             _ => {
-                let msg = format!("attempt to perform {} on a {:?} and a {:?}", op_name, v1, v2);
+                let msg = format!(
+                    "TypeMismatchException: binary operator '{}' is not defined for types '{:?}' and '{:?}'",
+                    op_name, v1, v2
+                );
                 Err(self.error(ErrorKind::TypeError(msg)))
             }
         }
@@ -120,7 +133,7 @@ impl VirtualMachine {
 
         //heap.alloc_string
         let new_str_ptr = self.heap.alloc_string(combined)
-            .ok_or_else(|| self.error(ErrorKind::OutOfMemory))?; 
+            .ok_or_else(|| self.error(ErrorKind::OutOfMemory))?;
 
         self.set_reg(dest as usize, LuaValue::String(new_str_ptr));
 
@@ -136,12 +149,22 @@ impl VirtualMachine {
                 Ok(n.to_string())
             }
             LuaValue::Nil => {
-                Err(self.error(ErrorKind::TypeError("attempt to concatenate a nil value".into())))
+                Err(self.error(ErrorKind::TypeError(
+                    "NullPointerException: illegal concatenation of a nil value".into()
+                )))
             }
             LuaValue::Boolean(b) => {
-                Err(self.error(ErrorKind::TypeError(format!("attempt to concatenate a boolean ({})", b))))
+                Err(self.error(ErrorKind::TypeError(format!(
+                    "TypeMismatchException: boolean type ({}) does not support implicit string conversion for concatenation",
+                    b
+                ))))
             }
-            _ => Err(self.error(ErrorKind::TypeError(format!("cannot concatenate a {:?}", val)))),
+            _ => {
+                Err(self.error(ErrorKind::TypeError(format!(
+                    "IncompatibleTypesException: cannot perform string concatenation on type '{:?}'",
+                    val
+                ))))
+            }
         }
     }
 }

@@ -34,7 +34,10 @@ impl VirtualMachine {
                 let func_name = &func_obj.name;
 
                 let meta = self.func_meta.get(func_name)
-                    .ok_or_else(|| self.error(ErrorKind::InternalError(format!("Metadata not found: {}", func_name))))?;
+                    .ok_or_else(|| self.error(ErrorKind::InternalError(format!(
+                        "InternalExecutionException: metadata for function '{}' could not be resolved",
+                        func_name
+                    ))))?;
 
                 let mut new_frame = StackFrame {
                     func_name: func_name.clone(),
@@ -61,7 +64,7 @@ impl VirtualMachine {
                 let num_results = c_func(self, base_reg, argc as usize)?;
 
                 if retc > 0 {
-                    let expected = (retc - 1) as usize; // 如果 retc=1，则期望0个
+                    let expected = (retc - 1) as usize;
                     for i in num_results..expected {
                         self.set_reg(func_idx + i, LuaValue::Nil);
                     }
@@ -69,9 +72,16 @@ impl VirtualMachine {
                 Ok(())
             }
 
-            _ => Err(self.error(ErrorKind::InvalidCall(
-                format!("尝试调用一个非函数类型: {}", func_val)
-            ))),
+            _ => {
+                let msg = match func_val {
+                    LuaValue::Nil => "NullPointerException: attempt to invoke a nil value".to_string(),
+                    _ => format!(
+                        "TypeMismatchException: object of type '{:?}' is not callable",
+                        func_val
+                    ),
+                };
+                Err(self.error(ErrorKind::InvalidCall(msg)))
+            }
         }
     }
     /// RETURN
@@ -82,7 +92,9 @@ impl VirtualMachine {
         }
 
         let current_frame = self.call_stack.pop()
-            .ok_or_else(|| self.error(ErrorKind::InternalError("Stack underflow on return".into())))?;
+            .ok_or_else(|| self.error(ErrorKind::InternalError(
+                "StackUnderflowException: attempt to return from an empty call stack".into()
+            )))?;
 
         if self.call_stack.is_empty() {
             return Ok(());
@@ -106,9 +118,11 @@ impl VirtualMachine {
     }
 
     pub fn handle_halt(&mut self) -> Result<(), VMError> {
-        println!("[VM] 收到 HALT 指令，正在安全退出...");
+        println!("[VM] HALT instruction received. Initiating graceful shutdown sequence...");
 
         self.call_stack.clear();
+
+        println!("[VM] Execution terminated. Status: Success (0)");
 
         Ok(())
     }

@@ -40,7 +40,10 @@ impl VirtualMachine {
                 if !((*(*s1)).data < (*(*s2)).data) { self.call_stack.last_mut().unwrap().pc += 1; }
                 Ok(())
             }
-            _ => Err(self.error(ErrorKind::TypeError(format!("无法比较 {:?} 和 {:?}", v1, v2)))),
+            _ => Err(self.error(ErrorKind::TypeError(format!(
+                "TypeMismatchException: relational operator '<' is not defined between '{:?}' and '{:?}'",
+                v1, v2
+            )))),
         }
     }
 
@@ -58,7 +61,10 @@ impl VirtualMachine {
                 if !((*(*s1)).data > (*(*s2)).data) { self.call_stack.last_mut().unwrap().pc += 1; }
                 Ok(())
             }
-            _ => Err(self.error(ErrorKind::TypeError(format!("无法比较 {:?} 和 {:?}", v1, v2)))),
+            _ => Err(self.error(ErrorKind::TypeError(format!(
+                "TypeMismatchException: relational operator '>' is not defined between '{:?}' and '{:?}'",
+                v1, v2
+            )))),
         }
     }
 
@@ -76,7 +82,10 @@ impl VirtualMachine {
                 if !((*(*s1)).data <= (*(*s2)).data) { self.call_stack.last_mut().unwrap().pc += 1; }
                 Ok(())
             }
-            _ => Err(self.error(ErrorKind::TypeError(format!("无法比较 {:?} 和 {:?}", v1, v2)))),
+            _ => Err(self.error(ErrorKind::TypeError(format!(
+                "TypeMismatchException: relational operator '<=' is not defined between '{:?}' and '{:?}'",
+                v1, v2
+            )))),
         }
     }
 
@@ -94,7 +103,10 @@ impl VirtualMachine {
                 if !((*(*s1)).data >= (*(*s2)).data) { self.call_stack.last_mut().unwrap().pc += 1; }
                 Ok(())
             }
-            _ => Err(self.error(ErrorKind::TypeError(format!("无法比较 {:?} 和 {:?}", v1, v2)))),
+            _ => Err(self.error(ErrorKind::TypeError(format!(
+                "TypeMismatchException: relational operator '>=' is not defined between '{:?}' and '{:?}'",
+                v1, v2
+            )))),
         }
     }
 

@@ -26,7 +26,9 @@ impl VirtualMachine {
 
         if let LuaValue::Table(ptr) = table_val {
             if key == LuaValue::Nil {
-                return Err(self.error(ErrorKind::TypeError("table index is nil".into())));
+                return Err(self.error(ErrorKind::TypeError(
+                    "NullPointerException: table index is nil (illegal key)".into()
+                )));
             }
 
             unsafe {
@@ -34,7 +36,10 @@ impl VirtualMachine {
             }
             Ok(())
         } else {
-            Err(self.error(ErrorKind::TypeError(format!("Attempt to index a {:?} value", table_val))))
+            Err(self.error(ErrorKind::TypeError(format!(
+                "TypeMismatchException: attempt to index a non-table value (actual type: '{:?}')",
+                table_val
+            ))))
         }
     }
 
@@ -59,7 +64,10 @@ impl VirtualMachine {
             self.set_reg(dest as usize, result);
             Ok(())
         } else {
-            Err(self.error(ErrorKind::TypeError("Attempt to index a non-table value".into())))
+            Err(self.error(ErrorKind::TypeError(format!(
+                "TypeMismatchException: attempt to perform property lookup on a non-table value (actual type: '{:?}')",
+                table_val
+            ))))
         }
     }
 

@@ -118,7 +118,7 @@ impl VirtualMachine {
         self.prepare_entry_frame();
 
         println!(
-            "[VM] 初始化成功：载入 {} 个函数元数据，主入口 _start 已就绪 (栈窗口: {})。",
+            "[VM] Initialization successful: {} function metadata resolved. Entry point '_start' initialized (stack_size: {}).",
             self.func_meta.len(),
             self.func_meta
                 .get("_start")
@@ -138,14 +138,18 @@ impl VirtualMachine {
             let entry_frame = StackFrame::new(entry_name.to_string(), meta.max_stack_size, None);
             self.call_stack.push(entry_frame);
         } else {
-            panic!("[VM 致命错误] 找不到入口函数 _start。请检查 IR 生成阶段。");
+            panic!(
+                "[VM Fatal] SymbolResolutionError: entry point '{}' not found. Ensure the IR generation phase emitted the mandatory entry symbol.",
+                entry_name
+            );
         }
     }
 
     pub fn run(&mut self) {
-        println!("[VM] 启动虚拟机，准备执行...");
+        println!("[VM] Starting execution engine...");
+
         if self.call_stack.is_empty() {
-            panic!("[VM 致命错误] 调用栈未初始化。");
+            panic!("[VM Fatal] IllegalStateException: call stack is uninitialized. No entry frame found.");
         }
         //loop
         while !self.call_stack.is_empty() {
@@ -165,29 +169,31 @@ impl VirtualMachine {
                 self.sweep_objects();
             }
         }
-        println!("[VM] 执行完毕，程序正常退出。");
+        println!("[VM] Execution completed. Program exited with code 0.");
     }
     fn protected_step(&mut self) -> Result<(), VMError> {
         let (func_name, pc) = {
             let frame = self
                 .call_stack
                 .last()
-                .ok_or_else(|| self.error(ErrorKind::InternalError("调用栈为空".into())))?;
+                .ok_or_else(|| self.error(ErrorKind::InternalError(
+                    "IllegalStateException: attempt to step execution on an empty call stack".into()
+                )))?;
             (frame.func_name.clone(), frame.pc)
         };
 
         let meta = self.func_meta.get(&func_name).ok_or_else(|| {
             self.error(ErrorKind::InternalError(format!(
-                "找不到函数元数据: {}",
+                "ResolutionException: failed to resolve metadata for function symbol '{}'",
                 func_name
             )))
         })?;
 
         if pc >= meta.bytecode.len() {
             return Err(self.error(ErrorKind::InternalError(format!(
-                "指令越界: 函数 {} 的 PC={}，但指令总数仅 {}",
-                func_name,
+                "InstructionOutOfBoundsException: PC ({:04}) exceeded bytecode range for function '{}' (total instructions: {})",
                 pc,
+                func_name,
                 meta.bytecode.len()
             ))));
         }
@@ -217,17 +223,24 @@ impl VirtualMachine {
     }
 
     fn report_error(&self, err: VMError) {
-        let sep = "!".repeat(60);
+        let sep = "=".repeat(70);
         eprintln!("\n{}", sep);
-        eprintln!("  运行时错误: {}", err.kind);
+
+        eprintln!("  {}", err.get_message());
+
         eprintln!(
-            "  位置: 函数 '{}'，指令地址 [PC: {:04}]",
+            "  Location: Function '{}' at instruction offset [PC: {:04}]",
             err.func_name, err.pc
         );
         eprintln!("{}", sep);
-        eprintln!("  调用栈回溯 (Stack Traceback):");
-        for (i, frame) in err.stack_trace.iter().enumerate().rev() {
-            eprintln!("    #{} -> {}", i, frame);
+
+        eprintln!("  Stack Traceback (most recent call first):");
+        if err.stack_trace.is_empty() {
+            eprintln!("    <empty_stack>");
+        } else {
+            for (i, frame_name) in err.stack_trace.iter().enumerate().rev() {
+                eprintln!("    #{:<2} at {}()", i, frame_name);
+            }
         }
         eprintln!("{}\n", sep);
     }
@@ -236,7 +249,7 @@ impl VirtualMachine {
         let (func_name, pc) = if let Some(frame) = self.call_stack.last() {
             (frame.func_name.clone(), frame.pc)
         } else {
-            ("unknown".to_string(), 0)
+            ("<unknown_context>".to_string(), 0)
         };
 
         let stack_trace = self
@@ -252,6 +265,7 @@ impl VirtualMachine {
             stack_trace,
         }
     }
+
     #[allow(dead_code)]
     fn cleanup_expired_registers(&mut self) {
         if let Some(frame) = self.call_stack.last_mut() {
@@ -436,14 +450,14 @@ impl VirtualMachine {
                 if let LuaValue::TempString(_) = val {
                     if let LuaValue::TempString(raw_s) = std::mem::replace(val, LuaValue::Nil) {
                         let gc_ptr = self.heap.alloc_string(raw_s)
-                            .expect("[VM] 启动失败：常量池分配内存不足");
+                            .expect("BootstrapError: OutOfMemory during constant pool string interning");
                         *val = LuaValue::String(gc_ptr);
                     }
                 }
             }
         }
 
-        println!("[VM] 常量池转换完成，进入运行时就绪状态。");
+        println!("[VM] Constant pool resolution completed. Runtime environment is ready.");
     }
 
     fn get_reg(&self, idx: usize) -> &LuaValue {
@@ -462,7 +476,10 @@ impl VirtualMachine {
     fn get_constant_string(&self, idx: usize) -> Result<String, VMError> {
         match self.get_constant(idx) {
             LuaValue::String(ptr) => unsafe { Ok((*(*ptr)).data.clone()) },
-            _ => Err(self.error(ErrorKind::InternalError("预期的字符串常量不存在".into()))),
+            _ => Err(self.error(ErrorKind::InternalError(format!(
+                "LinkageError: expected string constant at index {} was not found or has invalid type",
+                idx
+            )))),
         }
     }
 }

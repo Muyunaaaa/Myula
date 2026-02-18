@@ -11,8 +11,8 @@ use crate::frontend::ir::{self, IRModule, IRInstruction, IRTerminator, IROperand
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VarKind {
-    Reg(usize),  // 临时寄存器 %n
-    Slot(usize), // 局部变量槽位 %local_n
+    Reg(usize),  // %n
+    Slot(usize), // %local_n
 }
 
 #[derive(Debug, Clone)]

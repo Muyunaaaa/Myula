@@ -33,7 +33,7 @@ impl VirtualMachine {
             OpCode::NewTable { dest, .. } => self.handle_new_table(dest),
             OpCode::GetTable { dest, table, key } => self.handle_get_table(dest, table, key),
             OpCode::SetTable { table, key, value } => self.handle_set_table(table, key, value),
-            
+
             OpCode::FnProto { dest, proto_idx } => self.handle_fn_proto(dest, proto_idx),
 
             OpCode::Eq { left, right } => self.handle_eq(left, right),
@@ -51,7 +51,10 @@ impl VirtualMachine {
             OpCode::Halt => self.handle_halt(),
 
 
-            _ => Err(self.error(ErrorKind::InternalError(format!("未实现的指令: {:?}", instr)))),
+            _ => Err(self.error(ErrorKind::InternalError(format!(
+                "Unsupported opcode: {:?} (Instruction not implemented)",
+                instr
+            )))),
         }
     }
 }

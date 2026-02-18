@@ -29,34 +29,37 @@ impl std::fmt::Display for VMError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Runtime Error: {:?}\n  at function '{}', PC: {}\n  Context: {}",
-            self.kind, self.func_name, self.pc, self.get_message()
+            "ExecutionException: {}\n  at function '{}' [Offset: 0x{:04X}]",
+            self.get_message(),
+            self.func_name,
+            self.pc
         )
     }
 }
 
-impl std::fmt::Display for ErrorKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ErrorKind::TypeError(msg) => write!(f, "[Type Error] {}", msg),
-            ErrorKind::UndefinedVariable(msg) => write!(f, "[Undefined Variable] {}", msg),
-            ErrorKind::InvalidCall(msg) => write!(f, "[Invalid Call] {}", msg),
-            ErrorKind::ArithmeticError(msg) => write!(f, "[Arithmetic Error] {}", msg),
-            ErrorKind::StackOverflow => write!(f, "[Stack Overflow] 递归调用过深，超出栈限制"),
-            ErrorKind::OutOfMemory => write!(f, "[Out Of Memory] 内存耗尽，GC 后仍无法分配足够空间"),
-            ErrorKind::InternalError(msg) => write!(f, "[Internal Error] 虚拟机内部逻辑错误: {}", msg),
-        }
-    }
-}
 
 impl VMError {
     pub fn get_message(&self) -> String {
         match &self.kind {
-            ErrorKind::TypeError(m) => m.clone(),
-            ErrorKind::UndefinedVariable(v) => format!("variable '{}' is not defined", v),
-            ErrorKind::InvalidCall(m) => m.clone(),
-            ErrorKind::InternalError(m) => format!("[Internal] {}", m),
-            _ => format!("{:?}", self.kind),
+            ErrorKind::TypeError(m) => self.format_with_fallback("TypeMismatchException", m),
+            ErrorKind::InvalidCall(m) => self.format_with_fallback("IllegalInvocationException", m),
+            ErrorKind::ArithmeticError(m) => self.format_with_fallback("ArithmeticException", m),
+            ErrorKind::InternalError(m) => self.format_with_fallback("InternalExecutionException", m),
+
+            ErrorKind::UndefinedVariable(v) => {
+                format!("UnresolvedSymbolException: reference to undefined variable '{}'", v)
+            }
+
+            ErrorKind::StackOverflow => "StackOverflowError: call stack depth limit exceeded".into(),
+            ErrorKind::OutOfMemory => "OutOfMemoryError: heap exhaustion during allocation".into(),
+        }
+    }
+
+    fn format_with_fallback(&self, exception_name: &str, message: &str) -> String {
+        if message.starts_with(exception_name) {
+            message.to_string()
+        } else {
+            format!("{}: {}", exception_name, message)
         }
     }
 }
