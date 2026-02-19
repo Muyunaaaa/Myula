@@ -1,10 +1,11 @@
 use std::fs;
 use std::path::Path;
+use myula::backend::translator::scanner::Scanner;
 // 这里的导入路径请根据你项目的实际 crate 名修改
 use myula::frontend::parser::Parser;
 use myula::frontend::lexer::Lexer;
 use myula::frontend::ir::IRGenerator;
-use myula::backend::vm::VirtualMachine;
+use myula::backend::vm::{LogLevel, VirtualMachine};
 
 #[test]
 fn test_vm_from_lua_file() {
@@ -26,9 +27,11 @@ fn test_vm_from_lua_file() {
     let mut ir_gen = IRGenerator::new();
     ir_gen.generate(&program);
 
-    // 4. 后端初始化：IR -> Scanner -> Emitter -> VM Metadata
+    let mut scanner = Scanner::new();
+    scanner.global_scan(&ir_gen.get_module());
+
     let mut vm = VirtualMachine::new();
-    vm.init(&ir_gen);
+    vm.init(&ir_gen, LogLevel::Debug, &mut scanner);
 
     // 5. 打印 VM 内部状态（查看生成的 OpCode 和寄存器分配）
     println!("\n--- 编译产物展示 ---");

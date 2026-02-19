@@ -40,6 +40,15 @@ use crate::backend::vm::std_lib::{lua_builtin_print};
 use std::collections::HashMap;
 use std::io::Write;
 use std::ops::Index;
+use clap::ValueEnum;
+use crate::backend::vm::LogLevel::Release;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub enum LogLevel {
+    Release, // 仅输出程序结果
+    Debug,   // 输出基本编译信息
+    Trace,   // 输出全量寄存器生命周期、IR 和虚拟机指令追踪
+}
 
 pub struct FuncMetadata {
     pub bytecode: Vec<OpCode>,
@@ -52,7 +61,7 @@ pub struct FuncMetadata {
 
 const MAX_CALL_STACK: usize = 1000;
 const HARD_MEMORY_LIMIT: usize = 1024 * 1024 * 512;//512MB
-const VM_THRESHOLD: usize = 1024 * 8 ;//8KB
+const VM_THRESHOLD: usize = 1024 * 1024 ;//1MB
 
 pub struct VirtualMachine {
     pub call_stack: Vec<StackFrame>,
@@ -60,6 +69,7 @@ pub struct VirtualMachine {
     pub module: IRModule,
     pub func_meta: HashMap<String, FuncMetadata>,
     pub heap: Heap,
+    pub log_level: LogLevel,
 }
 
 impl VirtualMachine {
@@ -70,17 +80,19 @@ impl VirtualMachine {
             module: IRModule { functions: vec![] },
             func_meta: HashMap::new(),
             heap: Heap::new(),
+            log_level: Release,
         }
     }
 
     /// IR 扫描 -> 寄存器分配 -> 字节码生成 -> 入口帧准备
-    pub fn init(&mut self, generator: &IRGenerator) {
-        println!("[DEBUG] Starting scanner..."); std::io::stdout().flush().unwrap();
+    pub fn init(&mut self, generator: &IRGenerator, log_level: LogLevel, scanner: &mut Scanner) {
+        self.log_level = log_level;
+        if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
+            println!("[DEBUG] VM initialization started with log level: {:?}", self.log_level);
+            println!("[DEBUG] Starting scanner..."); std::io::stdout().flush().unwrap();
+        }
         self.module = generator.get_module().clone();
-
-        let mut scanner = Scanner::new();
-        scanner.global_scan(&self.module);
-
+        
         for func_ir in &self.module.functions {
             let func_name = &func_ir.name;
 
@@ -99,6 +111,11 @@ impl VirtualMachine {
                 }
             }
 
+            if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
+                println!("[DEBUG] Finished scanning"); std::io::stdout().flush().unwrap();
+                println!("[DEBUG] Starting emitter..."); std::io::stdout().flush().unwrap();
+            }
+            
             let emitter = BytecodeEmitter::new(func_ir, &scanner);
             let (bytecode, constants) = emitter.emit();
 
@@ -114,20 +131,35 @@ impl VirtualMachine {
             self.func_meta.insert(func_name.clone(), meta);
         }
 
+        if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
+            println!("[DEBUG] Finished emit"); std::io::stdout().flush().unwrap();
+            println!("[DEBUG] Loading standard library..."); std::io::stdout().flush().unwrap();
+        }
+        
         self.load_standard_library();
 
+        if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
+            println!("[DEBUG] Loading finalize constants..."); std::io::stdout().flush().unwrap();
+        }
+        
         self.finalize_constants();
 
+        if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
+            println!("[DEBUG] Preparing entry frame..."); std::io::stdout().flush().unwrap();
+        }
+        
         self.prepare_entry_frame();
 
-        println!(
-            "[VM] Initialization successful: {} function metadata resolved. Entry point '_start' initialized (stack_size: {}).",
-            self.func_meta.len(),
-            self.func_meta
-                .get("_start")
-                .map(|m| m.max_stack_size)
-                .unwrap_or(0)
-        );
+        if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
+            println!(
+                "[DEBUG] Initialization successful: {} function metadata resolved. Entry point '_start' initialized (stack_size: {}).",
+                self.func_meta.len(),
+                self.func_meta
+                    .get("_start")
+                    .map(|m| m.max_stack_size)
+                    .unwrap_or(0)
+            )
+        }
     }
 
     pub fn load_standard_library(&mut self) {
@@ -142,17 +174,19 @@ impl VirtualMachine {
             self.call_stack.push(entry_frame);
         } else {
             panic!(
-                "[VM Fatal] SymbolResolutionError: entry point '{}' not found. Ensure the IR generation phase emitted the mandatory entry symbol.",
+                "[ERROR] SymbolResolutionError: entry point '{}' not found. Ensure the IR generation phase emitted the mandatory entry symbol.",
                 entry_name
             );
         }
     }
 
     pub fn run(&mut self) {
-        println!("[VM] Starting execution engine...");
+        if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
+            println!("[DEBUG] Starting execution engine...");
+        }
 
         if self.call_stack.is_empty() {
-            panic!("[VM Fatal] IllegalStateException: call stack is uninitialized. No entry frame found.");
+            panic!("[ERROR] IllegalStateException: call stack is uninitialized. No entry frame found.");
         }
         //loop
         while !self.call_stack.is_empty() {
@@ -172,8 +206,11 @@ impl VirtualMachine {
                 self.sweep_objects();
             }
         }
-        println!("[VM] Max memory allocated during execution: {} bytes", self.heap.max_allocated);
-        println!("[VM] Execution completed. Program exited with code 0.");
+        if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
+            println!("[DEBUG] Max memory allocated during execution: {} bytes", self.heap.max_allocated);
+            
+        }
+        println!("Program exited with code 0.");
     }
     fn protected_step(&mut self) -> Result<(), VMError> {
         let (func_name, pc) = {
@@ -366,9 +403,9 @@ impl VirtualMachine {
             }
 
             //use for debug and performance monitoring
-            if swept_count > 0 {
+            if swept_count > 0 && matches!(self.log_level, LogLevel::Debug | LogLevel::Trace){
                 println!(
-                    "[GC] Sweep phase finished: reclaimed {} objects, {} bytes released. Current heap: {} bytes.",
+                    "[DEBUG] Sweep phase finished: reclaimed {} objects, {} bytes released. Current heap: {} bytes.",
                     swept_count,
                     swept_bytes,
                     self.heap.total_allocated
@@ -474,8 +511,9 @@ impl VirtualMachine {
                 }
             }
         }
-
-        println!("[VM] Constant pool resolution completed. Runtime environment is ready.");
+        if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
+            println!("[DEBUG] Constant pool resolution completed. Runtime environment is ready.");
+        }
     }
 
     fn get_reg(&self, idx: usize) -> &LuaValue {
