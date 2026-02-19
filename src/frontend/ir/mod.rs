@@ -1496,7 +1496,7 @@ impl IRGenerator {
         }
 
         // this should be the last instruction in the current basic block
-        if self.has_active_bb() {
+        if !self.has_active_bb() {
             self.emit_err(IRGeneratorError::MultipleReturnStatements);
         }
         self.close_bb(IRTerminator::Return(ret_operands));

@@ -2,7 +2,7 @@
 -- TEST SUCCESSFUL
 msg = "I am a global variable"
 
-local function test_global()
+function test_global()
     print("Inside function:", msg)
     msg = "Global changed!"
 end

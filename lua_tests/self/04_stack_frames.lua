@@ -1,14 +1,14 @@
 -- 测试：深度调用栈、参数拷贝、RETURN 后的 PC 恢复
 -- TEST FAILED
-local function add(x, y)
+function add(x, y)
     return x + y
 end
 
-local function square(n)
+function square(n)
     return n * n
 end
 
-local function complex_calc(a, b)
+function complex_calc(a, b)
     local sum = add(a, b)
     return square(sum)
 end
