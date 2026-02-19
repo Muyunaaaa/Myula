@@ -22,6 +22,9 @@
 //      26-02-14: Added mangling for local function names to avoid name conflicts
 //      26-02-18: Refactored IR generator and removed some redundant features like scope stack
 //      26-02-18: Added subfunction metadata for functions
+//      26-02-19: Fixed a bug in handling of early returns in if statements and loops, 
+//                now it will try to close the current basic block only when a block is active,
+//                instead of unconditionally closing a block, which may panic
 
 use std::collections::{HashMap};
 
@@ -60,6 +63,7 @@ struct IRFunctionContext {
 pub enum IRGeneratorError {
     UndefinedVariable(String),
     InvalidLValue,
+    MultipleReturnStatements,
 }
 
 #[derive(Debug, Clone)]
@@ -732,6 +736,23 @@ impl IRGenerator {
         }
     }
 
+    // try to close a possible active basic block with the given terminator,
+    // if there are no active basic block, it will do nothing instead of panicking,
+    // this is intended for specific scenarios, e.g. early return
+    //
+    // if x > 0 then 
+    //    return x
+    // else
+    //    return -x
+    // end
+    //
+    // if we just use close_bb, the program will crash
+    fn try_close_bb(&mut self, terminator: IRTerminator) {
+        if self.has_active_bb() {
+            self.close_bb(terminator);
+        }
+    }
+
     fn has_active_bb(&self) -> bool {
         self.current_context().active_block.is_some()
     }
@@ -1333,7 +1354,7 @@ impl IRGenerator {
         let else_bb_id = self.alloc_bb_id();
         let merge_bb_id = self.alloc_bb_id();
 
-        self.close_bb(IRTerminator::Branch {
+        self.try_close_bb(IRTerminator::Branch {
             cond: cond_reg,
             br_true: then_bb_id,
             br_false: else_bb_id,
@@ -1343,7 +1364,7 @@ impl IRGenerator {
         for stmt in then_branch {
             self.generate_stmt(stmt);
         }
-        self.close_bb(IRTerminator::Jump(merge_bb_id));
+        self.try_close_bb(IRTerminator::Jump(merge_bb_id));
 
         self.open_bb_lazy(else_bb_id);
         if let Some(else_branch) = else_branch {
@@ -1351,7 +1372,7 @@ impl IRGenerator {
                 self.generate_stmt(stmt);
             }
         }
-        self.close_bb(IRTerminator::Jump(merge_bb_id));
+        self.try_close_bb(IRTerminator::Jump(merge_bb_id));
 
         self.open_bb_lazy(merge_bb_id);
     }
@@ -1366,7 +1387,7 @@ impl IRGenerator {
         let merge_bb_id = self.alloc_bb_id();
 
         // fall through to condition check first
-        self.close_bb(IRTerminator::FallThrough);
+        self.try_close_bb(IRTerminator::FallThrough);
 
         // condition check block
         self.open_bb_lazy(cond_bb_id);
@@ -1383,7 +1404,7 @@ impl IRGenerator {
             self.generate_stmt(stmt);
         }
         // after body, jump back to condition check
-        self.close_bb(IRTerminator::Jump(cond_bb_id));
+        self.try_close_bb(IRTerminator::Jump(cond_bb_id));
 
         // merge block
         self.open_bb_lazy(merge_bb_id);
@@ -1399,7 +1420,7 @@ impl IRGenerator {
         let merge_bb_id = self.alloc_bb_id();
 
         // fall through to loop body first
-        self.close_bb(IRTerminator::FallThrough);
+        self.try_close_bb(IRTerminator::FallThrough);
 
         // loop body block
         self.open_bb_lazy(body_bb_id);
@@ -1407,12 +1428,12 @@ impl IRGenerator {
             self.generate_stmt(stmt);
         }
         // after body, fall through to condition check
-        self.close_bb(IRTerminator::FallThrough);
+        self.try_close_bb(IRTerminator::FallThrough);
 
         // condition check block
         self.open_bb_lazy(cond_bb_id);
         let cond_reg = self.generate_expr(condition);
-        self.close_bb(IRTerminator::Branch {
+        self.try_close_bb(IRTerminator::Branch {
             cond: cond_reg,
             br_true: merge_bb_id,
             br_false: body_bb_id,
@@ -1459,9 +1480,7 @@ impl IRGenerator {
         }
 
         // if the block is still open, close it with a return
-        if self.has_active_bb() {
-            self.close_bb(IRTerminator::Return(vec![IROperand::Unit]));
-        }
+        self.try_close_bb(IRTerminator::Return(vec![IROperand::Unit]));
 
         self.close_function();
 
@@ -1474,6 +1493,11 @@ impl IRGenerator {
         for val in values {
             let val_reg = self.generate_expr(val);
             ret_operands.push(val_reg);
+        }
+
+        // this should be the last instruction in the current basic block
+        if self.has_active_bb() {
+            self.emit_err(IRGeneratorError::MultipleReturnStatements);
         }
         self.close_bb(IRTerminator::Return(ret_operands));
     }
@@ -1556,9 +1580,7 @@ impl IRGenerator {
         }
 
         // if the block is still open, close it with a return
-        if self.has_active_bb() {
-            self.close_bb(IRTerminator::Return(vec![IROperand::Unit]));
-        }
+        self.try_close_bb(IRTerminator::Return(vec![IROperand::Unit]));
 
         self.close_function();
     }
