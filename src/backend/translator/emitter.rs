@@ -147,10 +147,25 @@ impl<'a> BytecodeEmitter<'a> {
 
             IRInstruction::FnProto { dest, func_proto } => {
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
-                let proto_idx = self.add_constant(LuaValue::TempString(func_proto.to_string()));
-                self.bytecode.push(OpCode::FnProto { dest: d, proto_idx });
-            }
 
+                let proto_name = match func_proto {
+                    IROperand::Proto(name) => name,
+                    _ => panic!("[Emitter Error] FnProto expected IROperand::Proto, got: {:?}", func_proto),
+                };
+
+                let proto_idx = self.func_ir.sub_functions
+                    .iter()
+                    .position(|name| name == proto_name)
+                    .expect(&format!(
+                        "Sub-function '{}' not listed in '{}'s sub_functions metadata",
+                        proto_name, self.func_ir.name
+                    ));
+
+                self.bytecode.push(OpCode::FnProto {
+                    dest: d,
+                    proto_idx: proto_idx as u16
+                });
+            }
             IRInstruction::Call { dest, callee, args } => {
                 let r_dest = self.get_phys_reg(VarKind::Reg(*dest));
                 let r_func = self.get_reg_index(callee);

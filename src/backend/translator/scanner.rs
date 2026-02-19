@@ -9,6 +9,7 @@
 //            set a stride of 4 for TEMP registers to force physical isolation and create implicit parameter buffers;
 //            fixed Register Aliasing conflicts occurring during parameter passing in CALL instructions,
 //            significantly improving compiler and VM stability.
+//            Fix the issue of registers not be allocated when reach the FnProto and other instructions
 
 use std::collections::{HashMap, HashSet};
 use crate::frontend::ir::{self, IRModule, IRInstruction, IRTerminator, IROperand};
@@ -141,6 +142,7 @@ impl Scanner {
                     IROperand::ImmFloat(_) => "Float",
                     IROperand::ImmStr(_) => "String",
                     IROperand::ImmBool(_) => "Boolean",
+                    IROperand::Nil => "Nil",
                     _ => "Dynamic",
                 };
                 self.record_def(func_name, VarKind::Reg(*dest), false, Some(type_str));
@@ -171,11 +173,14 @@ impl Scanner {
                 self.record_use(func_name, src1);
                 self.record_use(func_name, src2);
             }
+            IRInstruction::Unary { dest, src, .. } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, None);
+                self.record_use(func_name, src);
+            }
             IRInstruction::Call { dest, callee, args } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 self.record_use(func_name, callee);
-                // 将所有参数的生命周期延长到当前指令 PC + 1
-                // 这样可以确保在线性扫描分配时，这些寄存器在 Call 执行期间不会被视为“可回收”
+
                 for arg in args {
                     self.record_use(func_name, arg);
                     if let IROperand::Reg(id) = arg {
@@ -185,7 +190,6 @@ impl Scanner {
                         }
                     }
                 }
-
                 if let IROperand::Reg(id) = callee {
                     let key = (func_name.to_string(), VarKind::Reg(*id));
                     if let Some(lt) = self.lifetimes.get_mut(&key) {
@@ -203,8 +207,53 @@ impl Scanner {
                 self.record_use(func_name, name);
                 self.record_use(func_name, src);
             }
-            IRInstruction::Drop { src } => { self.record_use(func_name, src); }
-            _ => {}
+            IRInstruction::Drop { src } => {
+                self.record_use(func_name, src);
+            }
+            IRInstruction::NewTable { dest, size_array, size_hash } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, Some("Table"));
+                self.record_use(func_name, size_array);
+                self.record_use(func_name, size_hash);
+            }
+            IRInstruction::SetTable { dest, table, key, value } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, None);
+                self.record_use(func_name, table);
+                self.record_use(func_name, key);
+                self.record_use(func_name, value);
+            }
+            IRInstruction::GetTable { dest, table, key } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, None);
+                self.record_use(func_name, table);
+                self.record_use(func_name, key);
+            }
+
+            IRInstruction::IndexOf { dest, collection, index } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, None);
+                self.record_use(func_name, collection);
+                self.record_use(func_name, index);
+            }
+            IRInstruction::SetIndex { dest, collection, index, value } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, None);
+                self.record_use(func_name, collection);
+                self.record_use(func_name, index);
+                self.record_use(func_name, value);
+            }
+            IRInstruction::MemberOf { dest, collection, member } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, None);
+                self.record_use(func_name, collection);
+                self.record_use(func_name, member);
+            }
+            IRInstruction::SetMember { dest, collection, member, value } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, None);
+                self.record_use(func_name, collection);
+                self.record_use(func_name, member);
+                self.record_use(func_name, value);
+            }
+
+            IRInstruction::FnProto { dest, func_proto } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, Some("Function"));
+                self.record_use(func_name, func_proto);
+            }
         }
     }
 
