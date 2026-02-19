@@ -1,5 +1,5 @@
 -- 测试：全局表读写、标准库注入
--- TEST FAILED
+-- TEST SUCCESSFUL
 msg = "I am a global variable"
 
 local function test_global()

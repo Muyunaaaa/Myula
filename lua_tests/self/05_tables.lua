@@ -1,5 +1,5 @@
 -- 测试：表创建、键值对存取、元表占位
--- TEST FAILED
+-- TEST SUCCESSFUL
 local t = {}
 t["key"] = "value"
 t[123] = 456

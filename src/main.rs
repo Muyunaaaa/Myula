@@ -9,7 +9,7 @@ fn main() {
     test_vm_from_file();
 }
 fn test_vm_from_file() {
-    let file_path = "./lua_tests/self/06_full_syntax.lua";
+    let file_path = "./lua_tests/self/04_stack_frames.lua";
     assert!(Path::new(file_path).exists(), "测试文件不存在: {}", file_path);
 
     let source = fs::read_to_string(file_path)
