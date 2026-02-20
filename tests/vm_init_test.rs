@@ -1,20 +1,23 @@
+use myula::backend::translator::scanner::Scanner;
 use std::fs;
 use std::path::Path;
-use myula::backend::translator::scanner::Scanner;
 // 这里的导入路径请根据你项目的实际 crate 名修改
-use myula::frontend::parser::Parser;
-use myula::frontend::lexer::Lexer;
-use myula::frontend::ir::IRGenerator;
 use myula::backend::vm::{LogLevel, VirtualMachine};
+use myula::frontend::ir::IRGenerator;
+use myula::frontend::lexer::Lexer;
+use myula::frontend::parser::Parser;
 
 #[test]
 fn test_vm_from_lua_file() {
     // 1. 读取外部 Lua 文件
     let file_path = "./lua_tests/self/04_stack_frames.lua";
-    assert!(Path::new(file_path).exists(), "测试文件不存在: {}", file_path);
+    assert!(
+        Path::new(file_path).exists(),
+        "测试文件不存在: {}",
+        file_path
+    );
 
-    let source = fs::read_to_string(file_path)
-        .expect("无法读取 Lua 测试文件");
+    let source = fs::read_to_string(file_path).expect("无法读取 Lua 测试文件");
 
     println!("[Test] 正在编译文件: {}", file_path);
 

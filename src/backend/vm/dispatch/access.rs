@@ -1,5 +1,5 @@
-use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::VirtualMachine;
+use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::common::object::LuaValue;
 
 impl VirtualMachine {
@@ -38,7 +38,6 @@ impl VirtualMachine {
         } else {
             Err(self.error(ErrorKind::UndefinedVariable(name)))
         }
-
     }
 
     pub fn handle_set_global(&mut self, name_idx: u16, src: u16) -> Result<(), VMError> {
@@ -47,5 +46,16 @@ impl VirtualMachine {
         self.call_stack.last_mut().unwrap().pc += 1;
         self.globals.insert(name, val);
         Ok(())
+    }
+
+    pub fn handle_get_upval(&mut self, dest: u16, upval_idx: u16) -> Result<(), VMError> {
+        let curr_frame = self.call_stack.last().unwrap();
+        if let Some(upval) = curr_frame.upvalues.get(upval_idx as usize).cloned() {
+            self.set_reg(dest as usize, upval);
+            self.call_stack.last_mut().unwrap().pc += 1;
+            Ok(())
+        } else {
+            Err(self.error(ErrorKind::UndefinedUpValue(upval_idx)))
+        }
     }
 }

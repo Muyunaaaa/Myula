@@ -14,9 +14,9 @@
 //            dynamic GC triggering mechanism, providing a balance between memory footprint and execution throughput;
 //            [Memory Safety]: Added a hard memory limit check (HARD_MEMORY_LIMIT) within `alloc_raw_object`
 //            to provide an ultimate safeguard against OOM scenarios in the VM runtime.
-// 2026-02-19: Add more debug information for GC tuning, including max_allocated to track peak memory usage during execution, 
+// 2026-02-19: Add more debug information for GC tuning, including max_allocated to track peak memory usage during execution,
 //            aiding in optimizing GC thresholds and understanding memory patterns of Lua programs running on the VM.
-use crate::common::object::{GCObject, HeaderOnly, ObjectKind, LFunction, LuaValue};
+use crate::common::object::{GCObject, HeaderOnly, LFunction, LuaValue, ObjectKind};
 use std::collections::HashMap;
 
 pub struct Heap {
@@ -54,7 +54,10 @@ impl Heap {
             None
         }
     }
-    pub fn alloc_table(&mut self, table_data: crate::common::object::LuaTable) -> Option<*mut GCObject<crate::common::object::LuaTable>> {
+    pub fn alloc_table(
+        &mut self,
+        table_data: crate::common::object::LuaTable,
+    ) -> Option<*mut GCObject<crate::common::object::LuaTable>> {
         let size = std::mem::size_of::<GCObject<crate::common::object::LuaTable>>()
             + table_data.data.capacity() * std::mem::size_of::<(LuaValue, LuaValue)>();
 
@@ -69,7 +72,12 @@ impl Heap {
         self.alloc_raw_object(data, ObjectKind::Function, size)
     }
 
-    fn alloc_raw_object<T>(&mut self, data: T, kind: ObjectKind, size: usize) -> Option<*mut GCObject<T>> {
+    fn alloc_raw_object<T>(
+        &mut self,
+        data: T,
+        kind: ObjectKind,
+        size: usize,
+    ) -> Option<*mut GCObject<T>> {
         if self.total_allocated + size > crate::backend::vm::HARD_MEMORY_LIMIT {
             return None;
         }
@@ -87,14 +95,14 @@ impl Heap {
 
         self.total_allocated += size;
 
-        if(self.total_allocated > self.max_allocated) {
+        if (self.total_allocated > self.max_allocated) {
             self.max_allocated = self.total_allocated;
         }
 
         Some(ptr)
     }
 
-    pub fn check_gc_condition(&mut self) -> bool{
+    pub fn check_gc_condition(&mut self) -> bool {
         if self.total_allocated > self.threshold {
             return true;
         }

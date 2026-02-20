@@ -1,5 +1,5 @@
-use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::VirtualMachine;
+use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::common::object::LuaValue;
 use crate::common::opcode::UnaryOpType;
 
@@ -8,7 +8,6 @@ impl VirtualMachine {
     pub fn handle_add(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
         self.call_stack.last_mut().unwrap().pc += 1;
         self.handle_binary_op(dest, left, right, |n1, n2| n1 + n2, "addition")
-
     }
 
     /// SUB: R[dest] = R[left] - R[right]
@@ -30,7 +29,7 @@ impl VirtualMachine {
         if let LuaValue::Number(n2) = v2 {
             if *n2 == 0.0 {
                 return Err(self.error(ErrorKind::ArithmeticError(
-                    "ArithmeticException: division by zero".into()
+                    "ArithmeticException: division by zero".into(),
                 )));
             }
         }
@@ -53,36 +52,40 @@ impl VirtualMachine {
                     ))));
                 }
             }
-            UnaryOpType::Not => {
-                LuaValue::Boolean(!val.is_truthy())
-            }
+            UnaryOpType::Not => LuaValue::Boolean(!val.is_truthy()),
             //TODO: ir暂无Len指令，后续考虑支持
-            UnaryOpType::Len => {
-                match val {
-                    LuaValue::String(ptr) => unsafe {
-                        let s = &(*ptr).data;
-                        LuaValue::Number(s.len() as f64)
-                    },
+            UnaryOpType::Len => match val {
+                LuaValue::String(ptr) => unsafe {
+                    let s = &(*ptr).data;
+                    LuaValue::Number(s.len() as f64)
+                },
 
-                    LuaValue::Table(ptr) => unsafe {
-                        let table_data = &(*ptr).data.data;
-                        LuaValue::Number(table_data.len() as f64)
-                    },
-                    _ => {
-                        return Err(self.error(ErrorKind::TypeError(format!(
-                            "TypeMismatchException: operation '#' (len) is not defined for type '{:?}'",
-                            val
-                        ))));
-                    }
+                LuaValue::Table(ptr) => unsafe {
+                    let table_data = &(*ptr).data.data;
+                    LuaValue::Number(table_data.len() as f64)
+                },
+                _ => {
+                    return Err(self.error(ErrorKind::TypeError(format!(
+                        "TypeMismatchException: operation '#' (len) is not defined for type '{:?}'",
+                        val
+                    ))));
                 }
-            }
+            },
         };
 
         self.set_reg(dest as usize, res);
         Ok(())
     }
-    fn handle_binary_op<F>(&mut self, dest: u16, left: u16, right: u16, op_fn: F, op_name: &str) -> Result<(), VMError>
-    where F: Fn(f64, f64) -> f64
+    fn handle_binary_op<F>(
+        &mut self,
+        dest: u16,
+        left: u16,
+        right: u16,
+        op_fn: F,
+        op_name: &str,
+    ) -> Result<(), VMError>
+    where
+        F: Fn(f64, f64) -> f64,
     {
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
@@ -141,7 +144,9 @@ impl VirtualMachine {
         let combined = s1 + &s2;
 
         //heap.alloc_string
-        let new_str_ptr = self.heap.alloc_string(combined)
+        let new_str_ptr = self
+            .heap
+            .alloc_string(combined)
             .ok_or_else(|| self.error(ErrorKind::OutOfMemory))?;
 
         self.set_reg(dest as usize, LuaValue::String(new_str_ptr));

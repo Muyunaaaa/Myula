@@ -22,11 +22,12 @@
 //      26-02-14: Added mangling for local function names to avoid name conflicts
 //      26-02-18: Refactored IR generator and removed some redundant features like scope stack
 //      26-02-18: Added subfunction metadata for functions
-//      26-02-19: Fixed a bug in handling of early returns in if statements and loops, 
+//      26-02-19: Fixed a bug in handling of early returns in if statements and loops,
 //                now it will try to close the current basic block only when a block is active,
 //                instead of unconditionally closing a block, which may panic
+//      26-02-20: UpVal analysis and handling in IR generation
 
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
 use crate::frontend::parser;
 
@@ -40,6 +41,19 @@ pub struct IRGenerator {
 }
 
 type IRLocalVarSlot = usize;
+type IRUpValSlot = usize;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IRUpValType {
+    LocalVar(usize), // the slot number of the local variable captured of the parent function
+    UpVal(usize),    // the index of the upvalue in the parent function's upvalue list
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IRUpVal {
+    pub slot: IRUpValSlot,
+    pub ty: IRUpValType,
+}
 
 #[derive(Debug, Clone)]
 struct IRFunctionContext {
@@ -48,6 +62,7 @@ struct IRFunctionContext {
 
     // local variable name -> slot number
     local_variables: HashMap<String, IRLocalVarSlot>,
+    upvalues: HashMap<String, IRUpVal>,
 
     // names of sub function prototypes
     sub_functions: Vec<String>,
@@ -70,9 +85,11 @@ pub enum IRGeneratorError {
 pub enum IROperand {
     // virtual register
     Reg(usize),
-    // Local variable slot, used for AddrLocal instruction,
+    // Local variable slot, used for *Local instructions,
     // DO NOT use this directly as an operand in any other instructions
     Slot(IRLocalVarSlot),
+    // Upval slot
+    UpVal(IRUpValSlot),
     // function prototype name
     // you can think of it as a function type
     // do not use it directly except in FnProto instruction
@@ -95,6 +112,7 @@ impl IROperand {
             IROperand::Reg(reg) => format!("%{}", reg),
             IROperand::Proto(name) => format!("@{}", name),
             IROperand::Slot(slot) => format!("%local_{}", slot),
+            IROperand::UpVal(slot) => format!("%upval_{}", slot),
             IROperand::ImmFloat(f) => format!("${}", f),
             IROperand::ImmBool(b) => format!("${}", b),
             IROperand::ImmStr(s) => format!("$\"{}\"", s),
@@ -201,6 +219,13 @@ pub enum IRInstruction {
     StoreGlobal {
         dest: usize,
         name: IROperand,
+        src: IROperand,
+    },
+    // %dest = LoadUpVal %upval_slot
+    // load the value of upvalue at slot %upval_slot into %dest
+    // %upval_slot is guaranteed to be a IROperand::UpVal
+    LoadUpVal {
+        dest: usize,
         src: IROperand,
     },
     // %nil = Drop %src
@@ -358,6 +383,9 @@ impl IRInstruction {
                     name.to_string(),
                     src.to_string()
                 )
+            }
+            IRInstruction::LoadUpVal { dest, src } => {
+                format!("%{} = LoadUpVal {}", dest, src.to_string())
             }
             IRInstruction::Drop { src } => {
                 format!("%nil = Drop {}", src.to_string())
@@ -575,7 +603,8 @@ pub struct IRFunction {
     pub params: Vec<String>,
     pub basic_blocks: Vec<IRBasicBlock>,
     pub local_variables: HashMap<String, IRLocalVarSlot>, // local variable name -> slot number
-    pub sub_functions: Vec<String>, // names of sub function prototypes
+    pub upvalues: HashMap<String, IRUpVal>,               // upvalue name -> upvalue info
+    pub sub_functions: Vec<String>,                       // names of sub function prototypes
 }
 
 impl IRFunction {
@@ -593,6 +622,24 @@ impl IRFunction {
                 .map(|(_, s)| s.clone())
                 .collect::<Vec<_>>()
                 .join("\n")
+        };
+
+        let upvals_str = if self.upvalues.is_empty() {
+            "; <no upvalues>".to_string()
+        } else {
+            let mut upvals = self
+                .upvalues
+                .iter()
+                .map(|(name, upval)| {
+                    let ty_str = match &upval.ty {
+                        IRUpValType::LocalVar(slot) => format!("%local_{} of parent", slot),
+                        IRUpValType::UpVal(slot) => format!("%upval_{} of parent", slot),
+                    };
+                    format!("; %upval_{} = {} ({})", upval.slot, name, ty_str)
+                })
+                .collect::<Vec<_>>();
+            upvals.sort_by_key(|s| s.clone());
+            upvals.join("\n")
         };
 
         let sub_fns_str = if self.sub_functions.is_empty() {
@@ -624,8 +671,8 @@ impl IRFunction {
             &params.join(", ")
         };
         format!(
-            "function {}({}) {{\n{}\n;\n{}\n{}}}",
-            self.name, param_str, local_vars_str, sub_fns_str, bbs_str
+            "function {}({}) {{\n{}\n;\n{}\n;\n{}\n{}}}",
+            self.name, param_str, local_vars_str, upvals_str, sub_fns_str, bbs_str
         )
     }
 }
@@ -648,8 +695,8 @@ impl IRModule {
 #[derive(Debug, Clone, PartialEq)]
 enum IRValueScope {
     Global,
-    Local,
-    UpVal,
+    Local(usize),
+    UpVal(IRUpVal),
 }
 
 impl IRGenerator {
@@ -740,7 +787,7 @@ impl IRGenerator {
     // if there are no active basic block, it will do nothing instead of panicking,
     // this is intended for specific scenarios, e.g. early return
     //
-    // if x > 0 then 
+    // if x > 0 then
     //    return x
     // else
     //    return -x
@@ -768,6 +815,7 @@ impl IRGenerator {
             name,
             params: params,
             local_variables: HashMap::new(),
+            upvalues: HashMap::new(),
             sub_functions: vec![],
             active_block: None,
             basic_blocks: vec![],
@@ -778,10 +826,7 @@ impl IRGenerator {
 
     fn close_function(&mut self) {
         // leave the function scope
-        let local_vars = self
-            .current_context()
-            .local_variables
-            .clone();
+        let local_vars = self.current_context().local_variables.clone();
 
         let ctx = self
             .function_contexts
@@ -792,6 +837,7 @@ impl IRGenerator {
             params: ctx.params,
             basic_blocks: ctx.basic_blocks,
             local_variables: local_vars,
+            upvalues: ctx.upvalues,
             sub_functions: ctx.sub_functions,
         };
         self.module.functions.push(func);
@@ -804,33 +850,64 @@ impl IRGenerator {
     // declaring a local variable includes
     fn decl_local(&mut self, name: String) -> IRLocalVarSlot {
         let slot = self.current_context_mut().local_variables.len();
-        self.current_context_mut().local_variables.insert(name.clone(), slot);
+        self.current_context_mut()
+            .local_variables
+            .insert(name.clone(), slot);
         slot
     }
 
     fn find_local(&self, name: &String) -> Option<IRLocalVarSlot> {
-        self.current_context()
-            .local_variables
-            .get(name)
-            .cloned()
+        self.current_context().local_variables.get(name).cloned()
     }
 
-    fn var_scope(&self, name: &String) -> Option<IRValueScope> {
-        // check local scopes from innermost to outermost
-        let mut is_first = true;
-        for scope in self.function_contexts.iter().rev() {
-            if scope.local_variables.contains_key(name) {
-                if is_first {
-                    return Some(IRValueScope::Local);
-                } else {
-                    return Some(IRValueScope::UpVal);
-                }
-            }
-            is_first = false;
+    fn add_upval_to_context(&mut self, func_idx: usize, name: &String, ty: IRUpValType) -> IRUpVal {
+        let ctx = &mut self.function_contexts[func_idx];
+        let slot = ctx.upvalues.len();
+        let uv = IRUpVal { slot, ty };
+        ctx.upvalues.insert(name.clone(), uv.clone());
+        uv
+    }
+
+    fn var_scope_impl(&mut self, func_idx: usize, name: &String) -> Option<IRValueScope> {
+        let current_context = &self.function_contexts[func_idx];
+
+        if let Some(&slot) = current_context.local_variables.get(name) {
+            return Some(IRValueScope::Local(slot));
         }
 
-        // any undeclared variable is considered global
+        if let Some(uv) = current_context.upvalues.get(name) {
+            return Some(IRValueScope::UpVal(uv.clone()));
+        }
+
+        if func_idx > 0 {
+            if let Some(parent_scope) = self.var_scope_impl(func_idx - 1, name) {
+                match parent_scope {
+                    IRValueScope::Local(slot) => {
+                        let uv =
+                            self.add_upval_to_context(func_idx, name, IRUpValType::LocalVar(slot));
+                        return Some(IRValueScope::UpVal(uv));
+                    }
+                    IRValueScope::UpVal(parent_uv) => {
+                        let uv = self.add_upval_to_context(
+                            func_idx,
+                            name,
+                            IRUpValType::UpVal(parent_uv.slot),
+                        );
+                        return Some(IRValueScope::UpVal(uv));
+                    }
+                    IRValueScope::Global => {
+                        // global variable, do nothing
+                    }
+                }
+            }
+        }
+
         Some(IRValueScope::Global)
+    }
+
+    fn var_scope(&mut self, name: &String) -> Option<IRValueScope> {
+        let current_func_idx = self.function_contexts.len() - 1;
+        self.var_scope_impl(current_func_idx, name)
     }
 
     fn alloc_reg(&mut self) -> usize {
@@ -850,16 +927,8 @@ impl IRGenerator {
             parser::ast::Expression::Identifier(name) => {
                 let scope = self.var_scope(name);
                 match scope {
-                    Some(IRValueScope::Local) => {
+                    Some(IRValueScope::Local(slot)) => {
                         // local variable
-                        // find the address (register) of the local variable
-                        let slot = self.find_local(name);
-                        if slot.is_none() {
-                            self.emit_err(IRGeneratorError::UndefinedVariable(name.clone()));
-                            return src;
-                        }
-                        let slot = slot.unwrap();
-
                         // store the value into the local variable
                         // assign the value to a new register and return it
                         let dest_reg = self.alloc_reg();
@@ -1186,11 +1255,8 @@ impl IRGenerator {
             parser::ast::Expression::Identifier(name) => {
                 let scope = self.var_scope(name);
                 match scope {
-                    Some(IRValueScope::Local) => {
+                    Some(IRValueScope::Local(slot)) => {
                         // local variable
-                        // find the slot of the local variable
-                        let slot = self.find_local(name).unwrap();
-
                         let dest_reg = self.alloc_reg();
                         self.emit(IRInstruction::LoadLocal {
                             dest: dest_reg,
@@ -1217,9 +1283,14 @@ impl IRGenerator {
                         });
                         return IROperand::Reg(dest_reg);
                     }
-                    _ => {
-                        self.emit_err(IRGeneratorError::UndefinedVariable(name.clone()));
-                        return IROperand::Nil;
+                    Some(IRValueScope::UpVal(upval)) => {
+                        // upval
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::LoadUpVal {
+                            dest: dest_reg,
+                            src: IROperand::UpVal(upval.slot),
+                        });
+                        return IROperand::Reg(dest_reg);
                     }
                 };
             }
@@ -1513,8 +1584,8 @@ impl IRGenerator {
                 for (name, value) in names.iter().zip(values.iter()) {
                     let src = self.generate_expr(value);
                     // by default, 'Declaration' is for local variables
-                    let scope = self.var_scope(name);
-                    let slot = if scope == Some(IRValueScope::Local) {
+                    let scope = self.find_local(name);
+                    let slot = if let Some(slot) = scope {
                         // redefinition of local variable in the same scope
                         // this can happen, for example, in:
                         // if cond then
@@ -1524,7 +1595,7 @@ impl IRGenerator {
                         // end
                         //
                         // if already declared, just use the existing register
-                        self.find_local(name).unwrap()
+                        slot
                     } else {
                         // otherwise, declare a new local variable
                         self.decl_local(name.clone())

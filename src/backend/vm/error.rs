@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone)]
 pub enum ErrorKind {
     // 类型错误：例如 1 + "a"
@@ -15,6 +14,8 @@ pub enum ErrorKind {
     OutOfMemory,
     // 内部错误：OpCode 损坏或 VM 实现 Bug
     InternalError(String),
+    // 未定义的 UpValue
+    UndefinedUpValue(u16),
     // 尝试多返回值错误
     MultipleReturnValues(String),
 }
@@ -39,22 +40,34 @@ impl std::fmt::Display for VMError {
     }
 }
 
-
 impl VMError {
     pub fn get_message(&self) -> String {
         match &self.kind {
             ErrorKind::TypeError(m) => self.format_with_fallback("TypeMismatchException", m),
             ErrorKind::InvalidCall(m) => self.format_with_fallback("IllegalInvocationException", m),
             ErrorKind::ArithmeticError(m) => self.format_with_fallback("ArithmeticException", m),
-            ErrorKind::InternalError(m) => self.format_with_fallback("InternalExecutionException", m),
+            ErrorKind::InternalError(m) => {
+                self.format_with_fallback("InternalExecutionException", m)
+            }
+            ErrorKind::UndefinedUpValue(idx) => format!(
+                "UnresolvedSymbolException: reference to undefined upvalue at index {}",
+                idx
+            ),
 
             ErrorKind::UndefinedVariable(v) => {
-                format!("UnresolvedSymbolException: reference to undefined variable '{}'", v)
+                format!(
+                    "UnresolvedSymbolException: reference to undefined variable '{}'",
+                    v
+                )
             }
 
-            ErrorKind::StackOverflow => "StackOverflowError: call stack depth limit exceeded".into(),
+            ErrorKind::StackOverflow => {
+                "StackOverflowError: call stack depth limit exceeded".into()
+            }
             ErrorKind::OutOfMemory => "OutOfMemoryError: heap exhaustion during allocation".into(),
-            ErrorKind::MultipleReturnValues(m) => self.format_with_fallback("MultipleReturnValuesException", m),
+            ErrorKind::MultipleReturnValues(m) => {
+                self.format_with_fallback("MultipleReturnValuesException", m)
+            }
         }
     }
 

@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod ir_printer {
-    use std::fs;
-    use std::path::Path;
+    use myula::frontend::ir::IRGenerator;
     use myula::frontend::lexer::Lexer;
     use myula::frontend::parser::Parser;
-    use myula::frontend::ir::IRGenerator;
+    use std::fs;
+    use std::path::Path;
 
     #[test]
     fn print_lua_ir_structure() {
@@ -15,7 +15,10 @@ mod ir_printer {
         if !Path::new(file_path).exists() {
             // 如果找不到文件，打印当前工作目录辅助调试
             let cwd = std::env::current_dir().unwrap();
-            panic!("\n[错误] 找不到测试文件: {} \n当前工作目录: {:?}", file_path, cwd);
+            panic!(
+                "\n[错误] 找不到测试文件: {} \n当前工作目录: {:?}",
+                file_path, cwd
+            );
         }
 
         let lua_code = fs::read_to_string(file_path).expect("读取文件失败");

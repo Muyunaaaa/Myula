@@ -8,6 +8,7 @@
 //      26-02-11: Added function declaration parsing
 //      26-02-13: Added table constructor parsing and member access parsing
 //      26-02-18: Added concat operator parsing
+//      26-02-20: Allow nil-initialization of local variables by omitting the initializer
 
 pub mod ast;
 
@@ -655,6 +656,13 @@ impl Parser<'_> {
             }
         }
 
+        if self.peek_token() != &Token::Assign {
+            // local declaration without initialization, e.g. "local a, b, c"
+            // nil-initialize them
+            let values = vec![ast::Expression::Literal(ast::Literal::Nil); names.len()];
+            return Some(ast::Statement::Declaration { names, values });
+        }
+
         self.expect(Token::Assign);
 
         let mut values: Vec<ast::Expression> = vec![];
@@ -669,7 +677,7 @@ impl Parser<'_> {
             }
         }
 
-        return Some(ast::Statement::Declaration { names, values });
+        Some(ast::Statement::Declaration { names, values })
     }
 
     fn parse_if_statement(&mut self) -> Option<ast::Statement> {

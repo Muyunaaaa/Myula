@@ -1,9 +1,9 @@
 use clap::{Parser, ValueEnum};
+use myula::backend::translator::scanner::{Scanner, VarKind};
+use myula::backend::vm::{LogLevel, VirtualMachine};
+use myula::frontend::lexer::Lexer;
 use std::fs;
 use std::path::{Path, PathBuf};
-use myula::backend::translator::scanner::{Scanner, VarKind};
-use myula::backend::vm::{VirtualMachine, LogLevel};
-use myula::frontend::lexer::Lexer;
 
 #[derive(Parser)]
 #[command(name = "myulac")]
@@ -29,9 +29,15 @@ impl<'a> Drop for TraceGuard<'a> {
         if self.mode == LogLevel::Trace {
             let vm_ref = unsafe { &*self.vm_ptr };
 
-            println!("\n{:^105}", "*************************************************************************");
+            println!(
+                "\n{:^105}",
+                "*************************************************************************"
+            );
             println!("{:^105}", "MYULA COMPILER DIAGNOSTIC TRACE (AUTO-DUMP)");
-            println!("{:^105}", "*************************************************************************");
+            println!(
+                "{:^105}",
+                "*************************************************************************"
+            );
 
             print_ir_report(self.ir_gen);
             print_scanner_report(self.scanner);
@@ -89,17 +95,22 @@ fn main() {
     if cli.mode != LogLevel::Release {
         println!("--- [VM Execution Finished] ---");
     }
-
 }
 
 fn print_ir_report(ir_gen: &myula::frontend::ir::IRGenerator) {
     let module = ir_gen.get_module();
-    println!("\n{:30} {:^40} {:30}", "==========================", "IR STRUCTURE", "==========================");
+    println!(
+        "\n{:30} {:^40} {:30}",
+        "==========================", "IR STRUCTURE", "=========================="
+    );
     println!("{}", module.to_string());
 }
 
 fn print_emitter_report(vm: &VirtualMachine) {
-    println!("\n{:30} {:^40} {:30}", "==========================", "VM FINAL STATE", "==========================");
+    println!(
+        "\n{:30} {:^40} {:30}",
+        "==========================", "VM FINAL STATE", "=========================="
+    );
     vm.dump_internal_state();
 }
 
@@ -112,13 +123,19 @@ fn print_scanner_report(scanner: &Scanner) {
         return;
     }
 
-    println!("\n{:30} {:^40} {:30}", "==========================", "REGISTER ALLOCATION", "==========================");
+    println!(
+        "\n{:30} {:^40} {:30}",
+        "==========================", "REGISTER ALLOCATION", "=========================="
+    );
 
     for func in funcs {
         let (num_locals, max_stack) = scanner.func_stack_info.get(&func).unwrap();
 
         println!("\n▶ Subroutine: [{}]", func);
-        println!("  Metrics:  [{} Locals] [{} Max Stack]", num_locals, max_stack);
+        println!(
+            "  Metrics:  [{} Locals] [{} Max Stack]",
+            num_locals, max_stack
+        );
 
         println!("{:-<105}", "");
         println!(
@@ -127,21 +144,25 @@ fn print_scanner_report(scanner: &Scanner) {
         );
         println!("{:-<105}", "");
 
-        let mut vars: Vec<_> = scanner.lifetimes.iter()
+        let mut vars: Vec<_> = scanner
+            .lifetimes
+            .iter()
             .filter(|((f, _), _)| f == &func)
             .collect();
 
-        vars.sort_by(|((_, kind_a), lt_a), ((_, kind_b), lt_b)| {
-            match (kind_a, kind_b) {
+        vars.sort_by(
+            |((_, kind_a), lt_a), ((_, kind_b), lt_b)| match (kind_a, kind_b) {
                 (VarKind::Slot(id_a), VarKind::Slot(id_b)) => id_a.cmp(id_b),
                 (VarKind::Slot(_), VarKind::Reg(_)) => std::cmp::Ordering::Less,
                 (VarKind::Reg(_), VarKind::Slot(_)) => std::cmp::Ordering::Greater,
                 (VarKind::Reg(_), VarKind::Reg(_)) => lt_a.start.cmp(&lt_b.start),
-            }
-        });
+            },
+        );
 
         for ((_, kind), lt) in vars {
-            let p_idx = scanner.reg_map.get(&(func.clone(), kind.clone()))
+            let p_idx = scanner
+                .reg_map
+                .get(&(func.clone(), kind.clone()))
                 .expect("CRITICAL: Physical register mapping missing");
 
             let name = match kind {
@@ -151,7 +172,11 @@ fn print_scanner_report(scanner: &Scanner) {
 
             let kind_str = if lt.is_fixed { "LOCAL" } else { "TEMP" };
             let ty_str = lt.inferred_type.as_deref().unwrap_or("Dynamic");
-            let strategy = if lt.is_fixed { "Fixed Slot" } else { "Reusable" };
+            let strategy = if lt.is_fixed {
+                "Fixed Slot"
+            } else {
+                "Reusable"
+            };
 
             println!(
                 "{:<15} | {:<8} | {:<12} | R[{:<9}] | {:>3} -> {:<8} | {:<12}",
