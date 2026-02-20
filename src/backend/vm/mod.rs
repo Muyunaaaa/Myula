@@ -21,6 +21,8 @@
 //            Optimized performance by deprecating aggressive register auto-nulling in favor of a stable,
 //            frame-level reclamation strategy, resolving critical "Nil" value propagation bugs during cross-instruction execution.
 // 2026-02-19: Add more debug messages for instruction execution and GC events, providing better visibility into the VM's internal workings during development and testing.
+// 2026-02-20: Added upvalue capture support
+
 pub mod dispatch;
 pub mod error;
 pub mod heap;
@@ -122,13 +124,23 @@ impl VirtualMachine {
             let emitter = BytecodeEmitter::new(func_ir, &scanner);
             let (bytecode, constants) = emitter.emit();
 
+            // should not use upvalues.values() here because the order matters
+            // and hashtable does not guarantee the order
+            let mut upvalues =
+                func_ir
+                    .upvalues
+                    .values()
+                    .cloned()
+                    .collect::<Vec<IRUpVal>>();
+            upvalues.sort_by_key(|upval| upval.slot);
+
             let meta = FuncMetadata {
                 bytecode,
                 constants,
                 num_locals,
                 max_stack_size: max_usage + 2,//FIXME:这里的 +2 是为了给函数调用时的返回地址和参数留出空间，后续可以根据实际情况调整
                 reg_metadata: reg_info_map,
-                upvalues_metadata: func_ir.upvalues.values().cloned().collect(),
+                upvalues_metadata: upvalues,
                 child_protos: func_ir.sub_functions.clone(),
             };
 
