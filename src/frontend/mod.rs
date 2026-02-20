@@ -51,6 +51,57 @@ mod tests {
         print(tbl[\"b\"])
         print(tbl[1])
         print(\"123\" .. \"456\")
+
+        local fn_a, fn_b
+        function fn_a()
+            print(\"This is fn_a\")
+        end
+        fn_b = function()
+            fn_a()
+            print(\"This is fn_b\")
+        end
+
+        local function nested()
+            local x = 10
+            return function()
+                return function()
+                    return x
+                end
+            end
+        end
+        ",
+        );
+        let mut parser = Parser::new(&mut lexer);
+
+        let ast = parser.parse();
+        println!("{:#?}", ast);
+        println!("Lexer Errors: {:#?}", parser.get_lexer().get_err());
+        println!("Parser Errors: {:#?}", parser.get_err());
+
+        let mut ir_gen = IRGenerator::new();
+        ir_gen.generate(&ast);
+        println!("{}", ir_gen.get_module().to_string());
+        println!("IR Generation Errors: {:#?}", ir_gen.get_err());
+    }
+
+    #[test]
+    fn captures() {
+        let mut lexer = Lexer::new(
+            "
+        local x = 42
+
+        local function n() 
+            local function nested()
+                local x = 10
+                return function()
+                    local y = 20
+                    return function()
+                        return x + y
+                    end
+                end
+            end
+            return nested
+        end
         ",
         );
         let mut parser = Parser::new(&mut lexer);

@@ -199,6 +199,8 @@ impl Scanner {
                 self.record_use(func_name, name);
                 self.record_use(func_name, src);
             }
+            IRInstruction::LoadUpVal { dest: _dest, src: _src } 
+                => unimplemented!("Upvalue loading is not fully supported in the IR Scanner yet"),
             IRInstruction::Drop { src } => {
                 self.record_use(func_name, src);
             }
