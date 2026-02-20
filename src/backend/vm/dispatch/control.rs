@@ -104,6 +104,12 @@ impl VirtualMachine {
     /// 行为是对的，但是寄存器乱飞
     /// - Li
     pub fn handle_return(&mut self, start: u16, count: u8) -> Result<(), VMError> {
+        // FIXME:目前版本不支持多返回值，后续如果需要支持再改这里
+        if count > 1{
+            return Err(self.error(ErrorKind::MultipleReturnValues(
+                "MultipleReturnValuesException: returning multiple values is not supported in this VM version".into()
+            )));
+        }
         let mut results = Vec::new();
         for i in 0..(count as usize) {
             results.push(self.get_reg(start as usize + i).clone());

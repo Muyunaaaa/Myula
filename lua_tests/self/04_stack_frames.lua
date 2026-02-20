@@ -1,5 +1,5 @@
 -- 测试：深度调用栈、参数拷贝、RETURN 后的 PC 恢复
--- TEST FAILED
+-- TEST SUCCESSFUL
 function add(x, y)
     return x + y
 end

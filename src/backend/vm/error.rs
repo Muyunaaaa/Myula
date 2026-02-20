@@ -17,6 +17,8 @@ pub enum ErrorKind {
     InternalError(String),
     // 未定义的 UpValue
     UndefinedUpValue(u16),
+    // 尝试多返回值错误
+    MultipleReturnValues(String),
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +57,7 @@ impl VMError {
 
             ErrorKind::StackOverflow => "StackOverflowError: call stack depth limit exceeded".into(),
             ErrorKind::OutOfMemory => "OutOfMemoryError: heap exhaustion during allocation".into(),
+            ErrorKind::MultipleReturnValues(m) => self.format_with_fallback("MultipleReturnValuesException", m),
         }
     }
 
