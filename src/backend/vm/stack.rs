@@ -1,32 +1,65 @@
 // Myula compiler stack frame definitions
 // Created by: Yuyang Feng <mu_yunaaaa@mail.nwpu.edu.cn>
+// Changelog:
+//      26-02-20: Added GlobalStack struct to manage the global value stack, 
+//                and updated StackFrame to use base offsets into the global stack 
+//                instead of maintaining its own local register array
 use crate::common::object::LuaValue;
+
 pub struct StackFrame {
     pub func_name: String,
-    pub registers: Vec<LuaValue>,
+    pub base_offset: usize, // base offset in the global stack for this frame
+    pub reg_count: usize, // number of registers used by this frame
     pub pc: usize,
     pub ret_dest: Option<usize>,
 }
 
-impl StackFrame {
-    pub fn new(name: String, size: usize, ret_dest: Option<usize>) -> Self {
-        Self {
-            func_name: name,
-            registers: vec![LuaValue::Nil; size],
-            pc: 0,
-            ret_dest,
+#[derive(Default)]
+pub struct GlobalStack {
+    pub values: Vec<LuaValue>,
+}
+
+impl GlobalStack {
+    // reserve space for additional values
+    pub fn reserve(&mut self, min_size: usize) {
+        let current_len = self.values.len();
+        if current_len < min_size {
+            self.values.resize(min_size, LuaValue::Nil);
         }
+    }
+
+    // push a value onto the stack
+    pub fn push(&mut self, val: LuaValue) {
+        self.values.push(val);
+    }
+
+    // discard values above the given offset 
+    // used when returning from a function to clean up the stack
+    pub fn restore(&mut self, offset: usize) {
+        self.values.truncate(offset);
     }
 }
 
 impl StackFrame {
+    pub fn new(name: String, ret_dest: Option<usize>, base_offset: usize, reg_count: usize) -> Self {
+        Self {
+            func_name: name,
+            base_offset,
+            pc: 0,
+            ret_dest,
+            reg_count,
+        }
+    }
+}
+
+impl<'a> StackFrame {
     #[inline(always)]
-    pub fn get_reg(&self, idx: usize) -> &LuaValue {
-        &self.registers[idx]
+    pub fn get_reg(&self, idx: usize, global_stack: &'a GlobalStack) -> &'a LuaValue {
+        &global_stack.values[self.base_offset + idx]
     }
 
     #[inline(always)]
-    pub fn set_reg(&mut self, idx: usize, val: LuaValue) {
-        self.registers[idx] = val;
+    pub fn set_reg(&mut self, idx: usize, val: LuaValue, global_stack: &mut GlobalStack) {
+        global_stack.values[self.base_offset + idx] = val;
     }
 }

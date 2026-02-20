@@ -169,9 +169,9 @@ impl<'a> BytecodeEmitter<'a> {
             IRInstruction::Call { dest, callee, args } => {
                 let r_dest = self.get_phys_reg(VarKind::Reg(*dest));
                 let r_func = self.get_reg_index(callee);
-                for (i, arg) in args.iter().enumerate() {
+                for arg in args.iter() {
                     let r_src = self.get_reg_index(arg);
-                    self.bytecode.push(OpCode::Move { dest: r_func + 1 + i as u16, src: r_src });
+                    self.bytecode.push(OpCode::Push { src: r_src });
                 }
                 self.bytecode.push(OpCode::Call { func_reg: r_func, argc: args.len() as u8, retc: 1 });
                 if r_dest != r_func {

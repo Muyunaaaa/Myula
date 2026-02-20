@@ -46,6 +46,7 @@ impl VirtualMachine {
             OpCode::Test { reg } => self.handle_test(reg),
             OpCode::Jump { offset } => self.handle_jump(offset),
             OpCode::Call { func_reg, argc, retc } => self.handle_call(func_reg, argc, retc),
+            OpCode::Push { src } => self.handle_push(src),
             OpCode::Return { start, count } => self.handle_return(start, count),
 
             OpCode::Halt => self.handle_halt(),

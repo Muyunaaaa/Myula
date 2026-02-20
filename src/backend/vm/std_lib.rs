@@ -2,9 +2,12 @@ use crate::backend::vm::error::VMError;
 use crate::backend::vm::VirtualMachine;
 use crate::common::object::LuaValue;
 
-pub fn lua_builtin_print(vm: &mut VirtualMachine, base: usize, argc: usize) -> Result<usize, VMError> {
+pub fn lua_builtin_print(vm: &mut VirtualMachine, argc: usize) -> Result<usize, VMError> {
     for i in 0..argc {
-        let val = vm.get_reg(base + i);
+        // 现在调用约定改了，
+        // 参数全都是全局栈上面，get_reg 自带一层当前栈帧偏移，所以直接用 get_reg 就行了
+        // - Li
+        let val = vm.get_reg(i);
         
         let s = match val {
             LuaValue::Nil => "nil".to_string(),

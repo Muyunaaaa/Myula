@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use crate::backend::vm::error::VMError;
 use crate::backend::vm::VirtualMachine;
 
-pub type CFunction = fn(&mut VirtualMachine, usize, usize) -> Result<usize, VMError>;
+pub type CFunction = fn(&mut VirtualMachine, usize) -> Result<usize, VMError>;
 
 #[derive(Clone, PartialEq)]
 pub struct LuaTable {
