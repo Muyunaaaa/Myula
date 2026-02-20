@@ -15,6 +15,8 @@ pub enum ErrorKind {
     OutOfMemory,
     // 内部错误：OpCode 损坏或 VM 实现 Bug
     InternalError(String),
+    // 尝试多返回值错误
+    MultipleReturnValues(String),
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +54,7 @@ impl VMError {
 
             ErrorKind::StackOverflow => "StackOverflowError: call stack depth limit exceeded".into(),
             ErrorKind::OutOfMemory => "OutOfMemoryError: heap exhaustion during allocation".into(),
+            ErrorKind::MultipleReturnValues(m) => self.format_with_fallback("MultipleReturnValuesException", m),
         }
     }
 
