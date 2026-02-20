@@ -49,7 +49,7 @@ The Myula compilation pipeline follows classic compiler design, deeply optimized
 | **Functions**    | First-class Functions       | ✅          | Supports nested definitions and first-class passing    |
 |                  | Native Interop              | ✅          | Call Rust native code via `CFunc`                      |
 |                  | Multi-return                | 🏗          | Refactoring `handle_return` for contiguous space       |
-|                  | Closures                    | ✅          | Upvalue capture logic in planning                      |
+|                  | Closures                    | ✅          | Upvalue capture logic has been implemented!                     |
 
 ## 🛠 Module Features
 
