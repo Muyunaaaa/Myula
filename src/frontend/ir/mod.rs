@@ -128,6 +128,7 @@ pub enum IRBinOp {
     Sub,
     Mul,
     Div,
+    Mod,
     Pow,
     Concat,
     Eq,
@@ -150,6 +151,7 @@ impl IRBinOp {
 pub enum IRUnOp {
     Neg,
     Not,
+    TblLen,
 }
 
 impl IRUnOp {
@@ -1067,6 +1069,7 @@ impl IRGenerator {
             parser::ast::BinOp::Sub => IRBinOp::Sub,
             parser::ast::BinOp::Mul => IRBinOp::Mul,
             parser::ast::BinOp::Div => IRBinOp::Div,
+            parser::ast::BinOp::Mod => IRBinOp::Mod,
             parser::ast::BinOp::Pow => IRBinOp::Pow,
             parser::ast::BinOp::Concat => IRBinOp::Concat,
             parser::ast::BinOp::Eq => IRBinOp::Eq,
@@ -1102,6 +1105,7 @@ impl IRGenerator {
             parser::ast::UnOp::Pos => unimplemented!(), // why do you need this sh*t?
             parser::ast::UnOp::Neg => IRUnOp::Neg,
             parser::ast::UnOp::Not => IRUnOp::Not,
+            parser::ast::UnOp::TblLen => IRUnOp::TblLen,
         };
 
         self.emit(IRInstruction::Unary {

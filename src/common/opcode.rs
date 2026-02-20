@@ -58,6 +58,11 @@ pub enum OpCode {
         left: u16,
         right: u16,
     },
+    Mod {
+        dest: u16,
+        left: u16,
+        right: u16,
+    },
     Pow {
         dest: u16,
         left: u16,
@@ -180,6 +185,9 @@ impl fmt::Display for OpCode {
             }
             OpCode::Div { dest, left, right } => {
                 write!(f, "DIV      R{} R{} R{}", dest, left, right)
+            }
+            OpCode::Mod { dest, left, right } => {
+                write!(f, "MOD      R{} R{} R{}", dest, left, right)
             }
             OpCode::Pow { dest, left, right } => {
                 write!(f, "POW      R{} R{} R{}", dest, left, right)

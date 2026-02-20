@@ -4,6 +4,7 @@
 // Changelog:
 //      26-02-10: Initial version
 //      26-02-13: Added '@' operator for legacy table ctor
+//      26-02-20: Added '%' and '#' operators for modulo and length
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -21,7 +22,9 @@ pub enum Token {
     Minus,
     Asterisk,
     Slash,
+    Percent,
     Hat,
+    Hash,
     Concat,
 
     Eq,

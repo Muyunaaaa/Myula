@@ -89,6 +89,7 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    Mod,
     Pow,
     Concat,
     Eq,
@@ -107,4 +108,5 @@ pub enum UnOp {
     Pos,
     Neg,
     Not,
+    TblLen,
 }

@@ -36,6 +36,20 @@ impl VirtualMachine {
         self.handle_binary_op(dest, left, right, |n1, n2| n1 / n2, "division")
     }
 
+    /// MOD: R[dest] = R[left] % R[right]
+    pub fn handle_mod(&mut self, dest: u16, left: u16, right: u16) -> Result<(), VMError> {
+        self.call_stack.last_mut().unwrap().pc += 1;
+        let v2 = self.get_reg(right as usize);
+        if let LuaValue::Number(n2) = v2 {
+            if *n2 == 0.0 {
+                return Err(self.error(ErrorKind::ArithmeticError(
+                    "ArithmeticException: modulo by zero".into(),
+                )));
+            }
+        }
+        self.handle_binary_op(dest, left, right, |n1, n2| n1 % n2, "modulo")
+    }
+
     /// UNOP
     pub fn handle_unary_op(&mut self, dest: u16, src: u16, op: UnaryOpType) -> Result<(), VMError> {
         self.call_stack.last_mut().unwrap().pc += 1;
@@ -53,7 +67,6 @@ impl VirtualMachine {
                 }
             }
             UnaryOpType::Not => LuaValue::Boolean(!val.is_truthy()),
-            //TODO: ir暂无Len指令，后续考虑支持
             UnaryOpType::Len => match val {
                 LuaValue::String(ptr) => unsafe {
                     let s = &(*ptr).data;

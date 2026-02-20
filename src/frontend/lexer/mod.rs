@@ -4,6 +4,7 @@
 // Changelog:
 //      26-02-10: Initial version
 //      26-02-13: Added '@' operator for legacy table ctor
+//      26-02-20: Added '%' and '#' operators for modulo and length
 
 pub mod token;
 
@@ -234,7 +235,9 @@ impl Lexer<'_> {
                         '-' => Token::Minus,
                         '*' => Token::Asterisk,
                         '/' => Token::Slash,
+                        '%' => Token::Percent,
                         '^' => Token::Hat,
+                        '#' => Token::Hash,
                         '.' => self.double_char_op('.', Token::Concat, Token::Dot),
                         '=' => self.double_char_op('=', Token::Eq, Token::Assign),
                         '~' => self.double_char_op('=', Token::Neq, Token::Errno),

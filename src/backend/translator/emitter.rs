@@ -123,6 +123,11 @@ impl<'a> BytecodeEmitter<'a> {
                         left: l,
                         right: r,
                     }),
+                    IRBinOp::Mod => self.bytecode.push(OpCode::Mod {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
                     IRBinOp::Pow => self.bytecode.push(OpCode::Pow {
                         dest: d,
                         left: l,
@@ -186,6 +191,7 @@ impl<'a> BytecodeEmitter<'a> {
                 let op = match operator {
                     IRUnOp::Neg => UnaryOpType::Neg,
                     IRUnOp::Not => UnaryOpType::Not,
+                    IRUnOp::TblLen => UnaryOpType::Len,
                 };
                 self.bytecode.push(OpCode::UnOp {
                     dest: d,
