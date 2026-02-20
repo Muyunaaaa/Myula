@@ -26,6 +26,7 @@ impl VirtualMachine {
             OpCode::Sub { dest, left, right } => self.handle_sub(dest, left, right),
             OpCode::Mul { dest, left, right } => self.handle_mul(dest, left, right),
             OpCode::Div { dest, left, right } => self.handle_div(dest, left, right),
+            OpCode::Mod { dest, left, right } => self.handle_mod(dest, left, right),
             OpCode::UnOp { dest, src, op } => self.handle_unary_op(dest, src, op),
             OpCode::Concat { dest, left, right } => self.handle_concat(dest, left, right),
             OpCode::And { dest, left, right } => self.handle_and(dest, left, right),

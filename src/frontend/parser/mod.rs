@@ -114,7 +114,7 @@ impl Parser<'_> {
             | ast::BinOp::Geq => Some(3),
             ast::BinOp::Concat => Some(4),
             ast::BinOp::Add | ast::BinOp::Sub => Some(5),
-            ast::BinOp::Mul | ast::BinOp::Div => Some(6),
+            ast::BinOp::Mul | ast::BinOp::Div | ast::BinOp::Mod => Some(6),
             ast::BinOp::Pow => Some(7),
         }
     }
@@ -132,6 +132,7 @@ impl Parser<'_> {
             Token::Minus => Some(ast::BinOp::Sub),
             Token::Asterisk => Some(ast::BinOp::Mul),
             Token::Slash => Some(ast::BinOp::Div),
+            Token::Percent => Some(ast::BinOp::Mod),
             Token::Hat => Some(ast::BinOp::Pow),
             Token::Concat => Some(ast::BinOp::Concat),
             Token::Eq => Some(ast::BinOp::Eq),
@@ -331,6 +332,14 @@ impl Parser<'_> {
                 let operand = self.parse_unary_or_primary_expression()?;
                 Some(ast::Expression::UnOp {
                     operator: ast::UnOp::Not,
+                    operand: Box::new(operand),
+                })
+            }
+            Token::Hash => {
+                self.advance_tokens();
+                let operand = self.parse_unary_or_primary_expression()?;
+                Some(ast::Expression::UnOp {
+                    operator: ast::UnOp::TblLen,
                     operand: Box::new(operand),
                 })
             }
