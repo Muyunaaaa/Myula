@@ -51,8 +51,8 @@ pub enum IRUpValType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IRUpVal {
-    slot: IRUpValSlot,
-    ty: IRUpValType,
+    pub slot: IRUpValSlot,
+    pub ty: IRUpValType,
 }
 
 #[derive(Debug, Clone)]

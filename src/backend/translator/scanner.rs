@@ -14,6 +14,7 @@
 //            confirmed that the previous issues were not caused by the allocation strategy itself,
 //            but by the IR's inability to handle mutual calls between `local functions`;
 //            such calls are treated as closure behaviors among multiple functions within the `_start` scope.
+// 2026-02-20: Added support for upvalue tracking in the Scanner
 
 use std::collections::{HashMap, HashSet};
 use crate::frontend::ir::{self, IRModule, IRInstruction, IRTerminator, IROperand};
@@ -199,8 +200,11 @@ impl Scanner {
                 self.record_use(func_name, name);
                 self.record_use(func_name, src);
             }
-            IRInstruction::LoadUpVal { dest: _dest, src: _src } 
-                => unimplemented!("Upvalue loading is not fully supported in the IR Scanner yet"),
+            IRInstruction::LoadUpVal { dest, src: _src } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, None);
+                // todo: is it really necessary to record the use of upvalue here?
+                // since it has ambiguous lifetime
+            }
             IRInstruction::Drop { src } => {
                 self.record_use(func_name, src);
             }

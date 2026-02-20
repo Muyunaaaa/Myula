@@ -48,4 +48,15 @@ impl VirtualMachine {
         self.globals.insert(name, val);
         Ok(())
     }
+
+    pub fn handle_get_upval(&mut self, dest: u16, upval_idx: u16) -> Result<(), VMError> {
+        let curr_frame = self.call_stack.last().unwrap();
+        if let Some(upval) = curr_frame.upvalues.get(upval_idx as usize).cloned() {
+            self.set_reg(dest as usize, upval);
+            self.call_stack.last_mut().unwrap().pc += 1;
+            Ok(())
+        } else {
+            Err(self.error(ErrorKind::UndefinedUpValue(upval_idx)))
+        }
+    }
 }

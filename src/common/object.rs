@@ -110,6 +110,7 @@ pub struct LFunction {
     pub name: String,
     pub opcodes: Vec<crate::common::opcode::OpCode>,
     pub constants: Vec<LuaValue>,
+    pub upvalues: Vec<LuaValue>,
     pub num_locals: usize,
     pub max_stack_size: usize,
 }

@@ -15,6 +15,8 @@ pub enum ErrorKind {
     OutOfMemory,
     // 内部错误：OpCode 损坏或 VM 实现 Bug
     InternalError(String),
+    // 未定义的 UpValue
+    UndefinedUpValue(u16),
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +47,7 @@ impl VMError {
             ErrorKind::InvalidCall(m) => self.format_with_fallback("IllegalInvocationException", m),
             ErrorKind::ArithmeticError(m) => self.format_with_fallback("ArithmeticException", m),
             ErrorKind::InternalError(m) => self.format_with_fallback("InternalExecutionException", m),
+            ErrorKind::UndefinedUpValue(idx) => format!("UnresolvedSymbolException: reference to undefined upvalue at index {}", idx),
 
             ErrorKind::UndefinedVariable(v) => {
                 format!("UnresolvedSymbolException: reference to undefined variable '{}'", v)

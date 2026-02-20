@@ -38,6 +38,7 @@ impl VirtualMachine {
                         func_name, 
                         meta.max_stack_size, 
                         Some(func_reg as usize),
+                        func_obj.upvalues.clone()
                     );
 
                 self.call_stack.push(new_frame);
@@ -51,7 +52,8 @@ impl VirtualMachine {
                 let new_frame = self.make_stack_frame(
                     &format!("__native_{}", func_idx), 
                     0, 
-                    Some(func_idx)
+                    Some(func_idx),
+                    vec![]
                 );
 
                 // push dummy frame

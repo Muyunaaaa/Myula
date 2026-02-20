@@ -35,7 +35,7 @@ use crate::backend::vm::stack::{GlobalStack, StackFrame};
 use crate::common::object::LuaValue;
 use crate::common::object::{GCObject, HeaderOnly, ObjectKind};
 use crate::common::opcode::OpCode;
-use crate::frontend::ir::{IRGenerator, IRModule};
+use crate::frontend::ir::{IRGenerator, IRModule, IRUpVal};
 use crate::backend::vm::std_lib::{lua_builtin_print};
 use std::collections::HashMap;
 use std::io::Write;
@@ -56,6 +56,7 @@ pub struct FuncMetadata {
     pub num_locals: usize,
     pub max_stack_size: usize,
     pub reg_metadata: HashMap<usize, Lifetime>,
+    pub upvalues_metadata: Vec<IRUpVal>,
     pub child_protos: Vec<String>,
 }
 
@@ -127,6 +128,7 @@ impl VirtualMachine {
                 num_locals,
                 max_stack_size: max_usage + 2,//FIXME:这里的 +2 是为了给函数调用时的返回地址和参数留出空间，后续可以根据实际情况调整
                 reg_metadata: reg_info_map,
+                upvalues_metadata: func_ir.upvalues.values().cloned().collect(),
                 child_protos: func_ir.sub_functions.clone(),
             };
 
@@ -188,7 +190,8 @@ impl VirtualMachine {
         &mut self, 
         func_name: &str, 
         frame_size: usize, 
-        return_dest: Option<usize>
+        return_dest: Option<usize>,
+        upvalues: Vec<LuaValue>
     ) -> StackFrame {
         let base_offset = self.get_actual_stack_top();
         self.value_stack.reserve(base_offset + frame_size);
@@ -196,7 +199,8 @@ impl VirtualMachine {
             func_name.to_string(), 
             return_dest, 
             base_offset,
-            frame_size
+            frame_size,
+            upvalues,
         )
     }
 
@@ -206,7 +210,8 @@ impl VirtualMachine {
             let entry_frame = self.make_stack_frame(
                 entry_name, 
                 meta.max_stack_size,
-                None
+                None,
+                vec![],
             );
             self.call_stack.push(entry_frame);
         } else {
@@ -382,6 +387,13 @@ impl VirtualMachine {
                     self.mark_value(value);
                 }
             }
+
+            for stack_frame in &self.call_stack {
+                // for stack frames, mark upvalues
+                for upval in &stack_frame.upvalues {
+                    self.mark_value(upval);
+                }
+            }
         }
     }
 
@@ -473,6 +485,9 @@ impl VirtualMachine {
                     if self.mark_raw(*ptr as *mut GCObject<HeaderOnly>) {
                         for val in &(*(*ptr)).data.constants {
                             self.mark_value(val);
+                        }
+                        for upval in &(*(*ptr)).data.upvalues {
+                            self.mark_value(upval);
                         }
                     }
                 }

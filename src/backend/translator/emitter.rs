@@ -8,6 +8,7 @@
 // 2026-02-17: Implemented mapping and deduplication for variable names and function identifiers within the constant pool;
 //            ensured that identical string constants are stored only once;
 //            correctly handled the indexing relationship between functions/variables and their corresponding strings in the constant pool.
+// 2026-02-20: Added support for upvalue access in the emitter
 
 use crate::frontend::ir::{IRFunction, IRInstruction, IROperand, IRTerminator, IRBinOp, IRUnOp};
 use crate::backend::translator::scanner::{Scanner, VarKind};
@@ -223,7 +224,24 @@ impl<'a> BytecodeEmitter<'a> {
                     }
                 }
             }
-            _ => {}
+
+            IRInstruction::LoadUpVal { dest, src } => {
+                let d = self.get_phys_reg(VarKind::Reg(*dest));
+                // UpValue is already a UpVal register, which is a special register
+                // that has ambiguous lifetime and can only be accessed through certain opcodes
+                let upval_idx = if let IROperand::UpVal(id) = src {
+                    id
+                } else {
+                    panic!("[Emitter Error] LoadUpVal expected IROperand::UpVal for src, got: {:?}", src);
+                };
+                self.bytecode.push(OpCode::GetUpVal { dest: d, upval_idx: *upval_idx as u16 });
+            }
+
+            IRInstruction::Drop { src: _ } => {
+                // psedo instr, used for lifetime analysis, just ignore
+            }
+
+            _ => unimplemented!("[Emitter Error] Unsupported IR instruction: {:?}", instr),
         }
     }
 

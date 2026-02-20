@@ -15,6 +15,8 @@ pub enum OpCode {
     
     GetGlobal { dest: u16, name_idx: u16 },
     SetGlobal { name_idx: u16, src: u16 },
+
+    GetUpVal { dest: u16, upval_idx: u16 },
     
     Add { dest: u16, left: u16, right: u16 },
     Sub { dest: u16, left: u16, right: u16 },
@@ -58,6 +60,7 @@ impl fmt::Display for OpCode {
             OpCode::Move { dest, src } => write!(f, "MOVE     R{} R{}", dest, src),
             OpCode::GetGlobal { dest, name_idx } => write!(f, "GETGLOBAL R{} K{}", dest, name_idx),
             OpCode::SetGlobal { name_idx, src } => write!(f, "SETGLOBAL K{} R{}", name_idx, src),
+            OpCode::GetUpVal { dest, upval_idx } => write!(f, "GETUPVAL R{} U{}", dest, upval_idx),
             OpCode::Add { dest, left, right } => write!(f, "ADD      R{} R{} R{}", dest, left, right),
             OpCode::Sub { dest, left, right } => write!(f, "SUB      R{} R{} R{}", dest, left, right),
             OpCode::Mul { dest, left, right } => write!(f, "MUL      R{} R{} R{}", dest, left, right),
