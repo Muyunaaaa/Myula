@@ -31,19 +31,19 @@ mod std_lib;
 
 use crate::backend::translator::emitter::BytecodeEmitter;
 use crate::backend::translator::scanner::{Lifetime, Scanner};
+use crate::backend::vm::LogLevel::Release;
 use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::heap::Heap;
 use crate::backend::vm::stack::{GlobalStack, StackFrame};
+use crate::backend::vm::std_lib::lua_builtin_print;
 use crate::common::object::LuaValue;
 use crate::common::object::{GCObject, HeaderOnly, ObjectKind};
 use crate::common::opcode::OpCode;
 use crate::frontend::ir::{IRGenerator, IRModule, IRUpVal};
-use crate::backend::vm::std_lib::{lua_builtin_print};
+use clap::ValueEnum;
 use std::collections::HashMap;
 use std::io::Write;
 use std::ops::Index;
-use clap::ValueEnum;
-use crate::backend::vm::LogLevel::Release;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum LogLevel {
@@ -63,8 +63,8 @@ pub struct FuncMetadata {
 }
 
 const MAX_CALL_STACK: usize = 1000;
-const HARD_MEMORY_LIMIT: usize = 1024 * 1024 * 512;//512MB
-const VM_THRESHOLD: usize = 1024 * 1024 ;//1MB
+const HARD_MEMORY_LIMIT: usize = 1024 * 1024 * 512; //512MB
+const VM_THRESHOLD: usize = 1024 * 1024; //1MB
 
 pub struct VirtualMachine {
     pub call_stack: Vec<StackFrame>,
@@ -93,11 +93,15 @@ impl VirtualMachine {
     pub fn init(&mut self, generator: &IRGenerator, log_level: LogLevel, scanner: &mut Scanner) {
         self.log_level = log_level;
         if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
-            println!("[DEBUG] VM initialization started with log level: {:?}", self.log_level);
-            println!("[DEBUG] Starting scanner..."); std::io::stdout().flush().unwrap();
+            println!(
+                "[DEBUG] VM initialization started with log level: {:?}",
+                self.log_level
+            );
+            println!("[DEBUG] Starting scanner...");
+            std::io::stdout().flush().unwrap();
         }
         self.module = generator.get_module().clone();
-        
+
         for func_ir in &self.module.functions {
             let func_name = &func_ir.name;
 
@@ -117,28 +121,25 @@ impl VirtualMachine {
             }
 
             if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
-                println!("[DEBUG] Finished scanning"); std::io::stdout().flush().unwrap();
-                println!("[DEBUG] Starting emitter..."); std::io::stdout().flush().unwrap();
+                println!("[DEBUG] Finished scanning");
+                std::io::stdout().flush().unwrap();
+                println!("[DEBUG] Starting emitter...");
+                std::io::stdout().flush().unwrap();
             }
-            
+
             let emitter = BytecodeEmitter::new(func_ir, &scanner);
             let (bytecode, constants) = emitter.emit();
 
             // should not use upvalues.values() here because the order matters
             // and hashtable does not guarantee the order
-            let mut upvalues =
-                func_ir
-                    .upvalues
-                    .values()
-                    .cloned()
-                    .collect::<Vec<IRUpVal>>();
+            let mut upvalues = func_ir.upvalues.values().cloned().collect::<Vec<IRUpVal>>();
             upvalues.sort_by_key(|upval| upval.slot);
 
             let meta = FuncMetadata {
                 bytecode,
                 constants,
                 num_locals,
-                max_stack_size: max_usage + 2,//FIXME:这里的 +2 是为了给函数调用时的返回地址和参数留出空间，后续可以根据实际情况调整
+                max_stack_size: max_usage + 2, //FIXME:这里的 +2 是为了给函数调用时的返回地址和参数留出空间，后续可以根据实际情况调整
                 reg_metadata: reg_info_map,
                 upvalues_metadata: upvalues,
                 child_protos: func_ir.sub_functions.clone(),
@@ -148,22 +149,26 @@ impl VirtualMachine {
         }
 
         if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
-            println!("[DEBUG] Finished emit"); std::io::stdout().flush().unwrap();
-            println!("[DEBUG] Loading standard library..."); std::io::stdout().flush().unwrap();
+            println!("[DEBUG] Finished emit");
+            std::io::stdout().flush().unwrap();
+            println!("[DEBUG] Loading standard library...");
+            std::io::stdout().flush().unwrap();
         }
-        
+
         self.load_standard_library();
 
         if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
-            println!("[DEBUG] Loading finalize constants..."); std::io::stdout().flush().unwrap();
+            println!("[DEBUG] Loading finalize constants...");
+            std::io::stdout().flush().unwrap();
         }
-        
+
         self.finalize_constants();
 
         if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
-            println!("[DEBUG] Preparing entry frame..."); std::io::stdout().flush().unwrap();
+            println!("[DEBUG] Preparing entry frame...");
+            std::io::stdout().flush().unwrap();
         }
-        
+
         self.prepare_entry_frame();
 
         if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
@@ -179,7 +184,8 @@ impl VirtualMachine {
     }
 
     pub fn load_standard_library(&mut self) {
-        self.globals.insert("print".to_string(), LuaValue::CFunc(lua_builtin_print));
+        self.globals
+            .insert("print".to_string(), LuaValue::CFunc(lua_builtin_print));
         //TODO:完成其他标准库注册
     }
 
@@ -199,17 +205,17 @@ impl VirtualMachine {
     }
 
     fn make_stack_frame(
-        &mut self, 
-        func_name: &str, 
-        frame_size: usize, 
+        &mut self,
+        func_name: &str,
+        frame_size: usize,
         return_dest: Option<usize>,
-        upvalues: Vec<LuaValue>
+        upvalues: Vec<LuaValue>,
     ) -> StackFrame {
         let base_offset = self.get_actual_stack_top();
         self.value_stack.reserve(base_offset + frame_size);
         StackFrame::new(
-            func_name.to_string(), 
-            return_dest, 
+            func_name.to_string(),
+            return_dest,
             base_offset,
             frame_size,
             upvalues,
@@ -219,12 +225,7 @@ impl VirtualMachine {
     fn prepare_entry_frame(&mut self) {
         let entry_name = "_start";
         if let Some(meta) = self.func_meta.get(entry_name) {
-            let entry_frame = self.make_stack_frame(
-                entry_name, 
-                meta.max_stack_size,
-                None,
-                vec![],
-            );
+            let entry_frame = self.make_stack_frame(entry_name, meta.max_stack_size, None, vec![]);
             self.call_stack.push(entry_frame);
         } else {
             panic!(
@@ -240,7 +241,9 @@ impl VirtualMachine {
         }
 
         if self.call_stack.is_empty() {
-            panic!("[ERROR] IllegalStateException: call stack is uninitialized. No entry frame found.");
+            panic!(
+                "[ERROR] IllegalStateException: call stack is uninitialized. No entry frame found."
+            );
         }
         //loop
         while !self.call_stack.is_empty() {
@@ -261,19 +264,21 @@ impl VirtualMachine {
             }
         }
         if matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
-            println!("[DEBUG] Max memory allocated during execution: {} bytes", self.heap.max_allocated);
-            
+            println!(
+                "[DEBUG] Max memory allocated during execution: {} bytes",
+                self.heap.max_allocated
+            );
         }
         println!("Program exited with code 0.");
     }
     fn protected_step(&mut self) -> Result<(), VMError> {
         let (func_name, pc) = {
-            let frame = self
-                .call_stack
-                .last()
-                .ok_or_else(|| self.error(ErrorKind::InternalError(
-                    "IllegalStateException: attempt to step execution on an empty call stack".into()
-                )))?;
+            let frame = self.call_stack.last().ok_or_else(|| {
+                self.error(ErrorKind::InternalError(
+                    "IllegalStateException: attempt to step execution on an empty call stack"
+                        .into(),
+                ))
+            })?;
             (frame.func_name.clone(), frame.pc)
         };
 
@@ -462,12 +467,10 @@ impl VirtualMachine {
             }
 
             //use for debug and performance monitoring
-            if swept_count > 0 && matches!(self.log_level, LogLevel::Debug | LogLevel::Trace){
+            if swept_count > 0 && matches!(self.log_level, LogLevel::Debug | LogLevel::Trace) {
                 println!(
                     "[DEBUG] Sweep phase finished: reclaimed {} objects, {} bytes released. Current heap: {} bytes.",
-                    swept_count,
-                    swept_bytes,
-                    self.heap.total_allocated
+                    swept_count, swept_bytes, self.heap.total_allocated
                 );
             }
         }
@@ -572,8 +575,9 @@ impl VirtualMachine {
             for val in &mut meta.constants {
                 if let LuaValue::TempString(_) = val {
                     if let LuaValue::TempString(raw_s) = std::mem::replace(val, LuaValue::Nil) {
-                        let gc_ptr = self.heap.alloc_string(raw_s)
-                            .expect("BootstrapError: OutOfMemory during constant pool string interning");
+                        let gc_ptr = self.heap.alloc_string(raw_s).expect(
+                            "BootstrapError: OutOfMemory during constant pool string interning",
+                        );
                         *val = LuaValue::String(gc_ptr);
                     }
                 }
@@ -585,11 +589,18 @@ impl VirtualMachine {
     }
 
     fn get_reg(&self, idx: usize) -> &LuaValue {
-        &self.call_stack.last().unwrap().get_reg(idx, &self.value_stack)
+        &self
+            .call_stack
+            .last()
+            .unwrap()
+            .get_reg(idx, &self.value_stack)
     }
 
     fn set_reg(&mut self, idx: usize, val: LuaValue) {
-        self.call_stack.last_mut().unwrap().set_reg(idx, val, &mut self.value_stack);
+        self.call_stack
+            .last_mut()
+            .unwrap()
+            .set_reg(idx, val, &mut self.value_stack);
     }
 
     fn get_constant(&self, idx: usize) -> &LuaValue {

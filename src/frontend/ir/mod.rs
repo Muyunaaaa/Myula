@@ -22,12 +22,12 @@
 //      26-02-14: Added mangling for local function names to avoid name conflicts
 //      26-02-18: Refactored IR generator and removed some redundant features like scope stack
 //      26-02-18: Added subfunction metadata for functions
-//      26-02-19: Fixed a bug in handling of early returns in if statements and loops, 
+//      26-02-19: Fixed a bug in handling of early returns in if statements and loops,
 //                now it will try to close the current basic block only when a block is active,
 //                instead of unconditionally closing a block, which may panic
 //      26-02-20: UpVal analysis and handling in IR generation
 
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
 use crate::frontend::parser;
 
@@ -603,8 +603,8 @@ pub struct IRFunction {
     pub params: Vec<String>,
     pub basic_blocks: Vec<IRBasicBlock>,
     pub local_variables: HashMap<String, IRLocalVarSlot>, // local variable name -> slot number
-    pub upvalues: HashMap<String, IRUpVal>, // upvalue name -> upvalue info
-    pub sub_functions: Vec<String>, // names of sub function prototypes
+    pub upvalues: HashMap<String, IRUpVal>,               // upvalue name -> upvalue info
+    pub sub_functions: Vec<String>,                       // names of sub function prototypes
 }
 
 impl IRFunction {
@@ -787,7 +787,7 @@ impl IRGenerator {
     // if there are no active basic block, it will do nothing instead of panicking,
     // this is intended for specific scenarios, e.g. early return
     //
-    // if x > 0 then 
+    // if x > 0 then
     //    return x
     // else
     //    return -x
@@ -826,10 +826,7 @@ impl IRGenerator {
 
     fn close_function(&mut self) {
         // leave the function scope
-        let local_vars = self
-            .current_context()
-            .local_variables
-            .clone();
+        let local_vars = self.current_context().local_variables.clone();
 
         let ctx = self
             .function_contexts
@@ -853,15 +850,14 @@ impl IRGenerator {
     // declaring a local variable includes
     fn decl_local(&mut self, name: String) -> IRLocalVarSlot {
         let slot = self.current_context_mut().local_variables.len();
-        self.current_context_mut().local_variables.insert(name.clone(), slot);
+        self.current_context_mut()
+            .local_variables
+            .insert(name.clone(), slot);
         slot
     }
 
     fn find_local(&self, name: &String) -> Option<IRLocalVarSlot> {
-        self.current_context()
-            .local_variables
-            .get(name)
-            .cloned()
+        self.current_context().local_variables.get(name).cloned()
     }
 
     fn add_upval_to_context(&mut self, func_idx: usize, name: &String, ty: IRUpValType) -> IRUpVal {
@@ -887,11 +883,16 @@ impl IRGenerator {
             if let Some(parent_scope) = self.var_scope_impl(func_idx - 1, name) {
                 match parent_scope {
                     IRValueScope::Local(slot) => {
-                        let uv = self.add_upval_to_context(func_idx, name, IRUpValType::LocalVar(slot));
+                        let uv =
+                            self.add_upval_to_context(func_idx, name, IRUpValType::LocalVar(slot));
                         return Some(IRValueScope::UpVal(uv));
                     }
                     IRValueScope::UpVal(parent_uv) => {
-                        let uv = self.add_upval_to_context(func_idx, name, IRUpValType::UpVal(parent_uv.slot));
+                        let uv = self.add_upval_to_context(
+                            func_idx,
+                            name,
+                            IRUpValType::UpVal(parent_uv.slot),
+                        );
                         return Some(IRValueScope::UpVal(uv));
                     }
                     IRValueScope::Global => {

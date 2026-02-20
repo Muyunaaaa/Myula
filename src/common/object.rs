@@ -1,8 +1,8 @@
+use crate::backend::vm::VirtualMachine;
+use crate::backend::vm::error::VMError;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use crate::backend::vm::error::VMError;
-use crate::backend::vm::VirtualMachine;
 
 pub type CFunction = fn(&mut VirtualMachine, usize) -> Result<usize, VMError>;
 
@@ -24,7 +24,11 @@ pub struct GCObject<T> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum ObjectKind { String, Table, Function }
+pub enum ObjectKind {
+    String,
+    Table,
+    Function,
+}
 
 #[derive(Clone, PartialEq)]
 pub enum LuaValue {
@@ -36,7 +40,7 @@ pub enum LuaValue {
     Function(*mut GCObject<LFunction>),
     CFunc(CFunction),
     UserData(*mut std::ffi::c_void),
-    TempString(String)
+    TempString(String),
 }
 
 impl LuaValue {
@@ -57,7 +61,11 @@ impl std::hash::Hash for LuaValue {
         match self {
             LuaValue::Nil => (),
             LuaValue::Number(n) => {
-                let bits = if *n == 0.0 { 0.0f64.to_bits() } else { n.to_bits() };
+                let bits = if *n == 0.0 {
+                    0.0f64.to_bits()
+                } else {
+                    n.to_bits()
+                };
                 bits.hash(state);
             }
             LuaValue::Boolean(b) => b.hash(state),
@@ -78,8 +86,11 @@ impl fmt::Debug for LuaValue {
             LuaValue::Number(n) => write!(f, "Number({})", n),
             LuaValue::Boolean(b) => write!(f, "Bool({})", b),
             LuaValue::String(ptr) => unsafe {
-                if ptr.is_null() { write!(f, "String(NULL)") }
-                else { write!(f, "String(\"{}\")", (*(*ptr)).data) }
+                if ptr.is_null() {
+                    write!(f, "String(NULL)")
+                } else {
+                    write!(f, "String(\"{}\")", (*(*ptr)).data)
+                }
             },
             LuaValue::Table(ptr) => write!(f, "Table({:p})", ptr),
             LuaValue::Function(ptr) => write!(f, "LFunc({:p})", ptr),
@@ -96,8 +107,11 @@ impl fmt::Display for LuaValue {
             LuaValue::Number(n) => write!(f, "{}", n),
             LuaValue::Boolean(b) => write!(f, "{}", b),
             LuaValue::String(ptr) => unsafe {
-                if ptr.is_null() { write!(f, "null") }
-                else { write!(f, "\"{}\"", (*(*ptr)).data) }
+                if ptr.is_null() {
+                    write!(f, "null")
+                } else {
+                    write!(f, "\"{}\"", (*(*ptr)).data)
+                }
             },
             LuaValue::TempString(s) => write!(f, "\"{}\"", s),
             _ => write!(f, "{:?}", self),
@@ -129,7 +143,11 @@ pub struct LuaSymbol {
 impl fmt::Debug for LuaSymbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         unsafe {
-            let name_str = if self.name.is_null() { "NULL" } else { &(*self.name).data };
+            let name_str = if self.name.is_null() {
+                "NULL"
+            } else {
+                &(*self.name).data
+            };
             f.debug_struct("LuaSymbol")
                 .field("name", &name_str)
                 .field("value", &self.value)

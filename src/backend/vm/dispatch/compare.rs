@@ -1,10 +1,17 @@
-use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::VirtualMachine;
+use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::common::object::LuaValue;
 
 impl VirtualMachine {
-    pub fn handle_compare<F>(&mut self, dest: u16, left: u16, right: u16, op: F) -> Result<(), VMError>
-    where F: Fn(&LuaValue, &LuaValue) -> bool
+    pub fn handle_compare<F>(
+        &mut self,
+        dest: u16,
+        left: u16,
+        right: u16,
+        op: F,
+    ) -> Result<(), VMError>
+    where
+        F: Fn(&LuaValue, &LuaValue) -> bool,
     {
         let v1 = self.get_reg(left as usize);
         let v2 = self.get_reg(right as usize);
@@ -120,7 +127,7 @@ impl VirtualMachine {
         if !val.is_truthy() {
             let frame = self.call_stack.last_mut().unwrap();
             frame.pc += 2;
-        }else{
+        } else {
             let frame = self.call_stack.last_mut().unwrap();
             frame.pc += 1;
         }

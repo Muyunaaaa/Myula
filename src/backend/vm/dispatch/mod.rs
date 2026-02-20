@@ -1,13 +1,13 @@
-mod arithmetic;
 mod access;
-mod control;
-mod table;
-mod fn_proto;
+mod arithmetic;
 mod compare;
+mod control;
+mod fn_proto;
+mod table;
 
 use crate::backend::vm::VirtualMachine;
+use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::common::opcode::OpCode;
-use crate::backend::vm::error::{VMError, ErrorKind};
 
 impl VirtualMachine {
     pub fn execute_instruction(&mut self, instr: OpCode) -> Result<(), VMError> {
@@ -47,12 +47,15 @@ impl VirtualMachine {
 
             OpCode::Test { reg } => self.handle_test(reg),
             OpCode::Jump { offset } => self.handle_jump(offset),
-            OpCode::Call { func_reg, argc, retc } => self.handle_call(func_reg, argc, retc),
+            OpCode::Call {
+                func_reg,
+                argc,
+                retc,
+            } => self.handle_call(func_reg, argc, retc),
             OpCode::Push { src } => self.handle_push(src),
             OpCode::Return { start, count } => self.handle_return(start, count),
 
             OpCode::Halt => self.handle_halt(),
-
 
             _ => Err(self.error(ErrorKind::InternalError(format!(
                 "Unsupported opcode: {:?} (Instruction not implemented)",

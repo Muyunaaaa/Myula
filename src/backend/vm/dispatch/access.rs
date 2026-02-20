@@ -1,5 +1,5 @@
-use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::VirtualMachine;
+use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::common::object::LuaValue;
 
 impl VirtualMachine {
@@ -38,7 +38,6 @@ impl VirtualMachine {
         } else {
             Err(self.error(ErrorKind::UndefinedVariable(name)))
         }
-
     }
 
     pub fn handle_set_global(&mut self, name_idx: u16, src: u16) -> Result<(), VMError> {

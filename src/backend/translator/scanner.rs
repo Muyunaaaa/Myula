@@ -16,8 +16,8 @@
 //            such calls are treated as closure behaviors among multiple functions within the `_start` scope.
 // 2026-02-20: Added support for upvalue tracking in the Scanner
 
+use crate::frontend::ir::{self, IRInstruction, IRModule, IROperand, IRTerminator};
 use std::collections::{HashMap, HashSet};
-use crate::frontend::ir::{self, IRModule, IRInstruction, IRTerminator, IROperand};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VarKind {
@@ -90,7 +90,9 @@ impl Scanner {
             }
         }
 
-        let mut temps: Vec<_> = self.lifetimes.iter()
+        let mut temps: Vec<_> = self
+            .lifetimes
+            .iter()
             .filter(|((f, kind), _)| f == func_name && matches!(kind, VarKind::Reg(_)))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -125,7 +127,8 @@ impl Scanner {
             max_usage = max_usage.max(active.len() + num_slots);
         }
 
-        self.func_stack_info.insert(func_name.clone(), (num_slots, max_usage));
+        self.func_stack_info
+            .insert(func_name.clone(), (num_slots, max_usage));
     }
 
     fn process_instr(&mut self, func_name: &str, instr: &IRInstruction) {
@@ -146,14 +149,20 @@ impl Scanner {
             }
             IRInstruction::StoreLocal { dest, dst, src } => {
                 let src_type = if let IROperand::Reg(id) = src {
-                    self.lifetimes.get(&(func_name.to_string(), VarKind::Reg(*id)))
+                    self.lifetimes
+                        .get(&(func_name.to_string(), VarKind::Reg(*id)))
                         .and_then(|lt| lt.inferred_type.clone())
-                } else { None };
+                } else {
+                    None
+                };
 
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 if let IROperand::Slot(slot_id) = dst {
                     if let Some(ty) = src_type {
-                        if let Some(lt) = self.lifetimes.get_mut(&(func_name.to_string(), VarKind::Slot(*slot_id))) {
+                        if let Some(lt) = self
+                            .lifetimes
+                            .get_mut(&(func_name.to_string(), VarKind::Slot(*slot_id)))
+                        {
                             lt.inferred_type = Some(ty);
                         }
                     }
@@ -161,7 +170,9 @@ impl Scanner {
                 self.record_use(func_name, dst);
                 self.record_use(func_name, src);
             }
-            IRInstruction::Binary { dest, src1, src2, .. } => {
+            IRInstruction::Binary {
+                dest, src1, src2, ..
+            } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 self.record_use(func_name, src1);
                 self.record_use(func_name, src2);
@@ -193,7 +204,9 @@ impl Scanner {
             IRInstruction::LoadGlobal { dest, name } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 self.record_use(func_name, name);
-                if let IROperand::ImmStr(s) = name { self.global_vars.insert(s.clone()); }
+                if let IROperand::ImmStr(s) = name {
+                    self.global_vars.insert(s.clone());
+                }
             }
             IRInstruction::StoreGlobal { dest, name, src } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
@@ -208,12 +221,21 @@ impl Scanner {
             IRInstruction::Drop { src } => {
                 self.record_use(func_name, src);
             }
-            IRInstruction::NewTable { dest, size_array, size_hash } => {
+            IRInstruction::NewTable {
+                dest,
+                size_array,
+                size_hash,
+            } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, Some("Table"));
                 self.record_use(func_name, size_array);
                 self.record_use(func_name, size_hash);
             }
-            IRInstruction::SetTable { dest, table, key, value } => {
+            IRInstruction::SetTable {
+                dest,
+                table,
+                key,
+                value,
+            } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 self.record_use(func_name, table);
                 self.record_use(func_name, key);
@@ -225,23 +247,41 @@ impl Scanner {
                 self.record_use(func_name, key);
             }
 
-            IRInstruction::IndexOf { dest, collection, index } => {
+            IRInstruction::IndexOf {
+                dest,
+                collection,
+                index,
+            } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 self.record_use(func_name, collection);
                 self.record_use(func_name, index);
             }
-            IRInstruction::SetIndex { dest, collection, index, value } => {
+            IRInstruction::SetIndex {
+                dest,
+                collection,
+                index,
+                value,
+            } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 self.record_use(func_name, collection);
                 self.record_use(func_name, index);
                 self.record_use(func_name, value);
             }
-            IRInstruction::MemberOf { dest, collection, member } => {
+            IRInstruction::MemberOf {
+                dest,
+                collection,
+                member,
+            } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 self.record_use(func_name, collection);
                 self.record_use(func_name, member);
             }
-            IRInstruction::SetMember { dest, collection, member, value } => {
+            IRInstruction::SetMember {
+                dest,
+                collection,
+                member,
+                value,
+            } => {
                 self.record_def(func_name, VarKind::Reg(*dest), false, None);
                 self.record_use(func_name, collection);
                 self.record_use(func_name, member);
@@ -255,7 +295,13 @@ impl Scanner {
         }
     }
 
-    fn record_def(&mut self, func_name: &str, var: VarKind, is_fixed: bool, type_hint: Option<&str>) {
+    fn record_def(
+        &mut self,
+        func_name: &str,
+        var: VarKind,
+        is_fixed: bool,
+        type_hint: Option<&str>,
+    ) {
         let key = (func_name.to_string(), var);
         let entry = self.lifetimes.entry(key).or_insert(Lifetime {
             start: self.instr_count,
@@ -285,8 +331,14 @@ impl Scanner {
 
     fn process_terminator(&mut self, func_name: &str, term: &IRTerminator) {
         match term {
-            IRTerminator::Return(ops) => { for op in ops { self.record_use(func_name, op); } }
-            IRTerminator::Branch { cond, .. } => { self.record_use(func_name, cond); }
+            IRTerminator::Return(ops) => {
+                for op in ops {
+                    self.record_use(func_name, op);
+                }
+            }
+            IRTerminator::Branch { cond, .. } => {
+                self.record_use(func_name, cond);
+            }
             _ => {}
         }
     }

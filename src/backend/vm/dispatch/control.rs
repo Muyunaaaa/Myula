@@ -1,6 +1,6 @@
+use crate::backend::vm::VirtualMachine;
 use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::stack::StackFrame;
-use crate::backend::vm::VirtualMachine;
 use crate::common::object::LuaValue;
 
 impl VirtualMachine {
@@ -33,13 +33,12 @@ impl VirtualMachine {
                         func_name
                     ))))?;
 
-                let new_frame = 
-                    self.make_stack_frame(
-                        func_name, 
-                        meta.max_stack_size, 
-                        Some(func_reg as usize),
-                        func_obj.upvalues.clone()
-                    );
+                let new_frame = self.make_stack_frame(
+                    func_name,
+                    meta.max_stack_size,
+                    Some(func_reg as usize),
+                    func_obj.upvalues.clone(),
+                );
 
                 self.call_stack.push(new_frame);
                 Ok(())
@@ -50,10 +49,10 @@ impl VirtualMachine {
 
                 let stack_top = self.get_actual_stack_top();
                 let new_frame = self.make_stack_frame(
-                    &format!("__native_{}", func_idx), 
-                    0, 
+                    &format!("__native_{}", func_idx),
+                    0,
                     Some(func_idx),
-                    vec![]
+                    vec![],
                 );
 
                 // push dummy frame
@@ -76,7 +75,9 @@ impl VirtualMachine {
 
             _ => {
                 let msg = match func_val {
-                    LuaValue::Nil => "NullPointerException: attempt to invoke a nil value".to_string(),
+                    LuaValue::Nil => {
+                        "NullPointerException: attempt to invoke a nil value".to_string()
+                    }
                     _ => format!(
                         "TypeMismatchException: object of type '{:?}' is not callable",
                         func_val
@@ -105,7 +106,7 @@ impl VirtualMachine {
     /// - Li
     pub fn handle_return(&mut self, start: u16, count: u8) -> Result<(), VMError> {
         // FIXME:目前版本不支持多返回值，后续如果需要支持再改这里
-        if count > 1{
+        if count > 1 {
             return Err(self.error(ErrorKind::MultipleReturnValues(
                 "MultipleReturnValuesException: returning multiple values is not supported in this VM version".into()
             )));
@@ -115,10 +116,11 @@ impl VirtualMachine {
             results.push(self.get_reg(start as usize + i).clone());
         }
 
-        let last_frame = self.call_stack.pop()
-            .ok_or_else(|| self.error(ErrorKind::InternalError(
-                "StackUnderflowException: attempt to return from an empty call stack".into()
-            )))?;
+        let last_frame = self.call_stack.pop().ok_or_else(|| {
+            self.error(ErrorKind::InternalError(
+                "StackUnderflowException: attempt to return from an empty call stack".into(),
+            ))
+        })?;
 
         if self.call_stack.is_empty() {
             return Ok(());

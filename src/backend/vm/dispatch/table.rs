@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::VirtualMachine;
+use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::common::object::LuaValue;
+use std::collections::HashMap;
 
 impl VirtualMachine {
     /// NEWTABLE: 创建新表 R[dest] = {}
@@ -12,7 +12,9 @@ impl VirtualMachine {
             metatable: None,
         };
 
-        let table_ptr = self.heap.alloc_table(new_table)
+        let table_ptr = self
+            .heap
+            .alloc_table(new_table)
             .ok_or_else(|| self.error(ErrorKind::OutOfMemory))?;
 
         self.set_reg(dest as usize, LuaValue::Table(table_ptr));
@@ -29,7 +31,7 @@ impl VirtualMachine {
         if let LuaValue::Table(ptr) = table_val {
             if key == LuaValue::Nil {
                 return Err(self.error(ErrorKind::TypeError(
-                    "NullPointerException: table index is nil (illegal key)".into()
+                    "NullPointerException: table index is nil (illegal key)".into(),
                 )));
             }
 

@@ -1,8 +1,8 @@
 // Myula compiler stack frame definitions
 // Created by: Yuyang Feng <mu_yunaaaa@mail.nwpu.edu.cn>
 // Changelog:
-//      26-02-20: Added GlobalStack struct to manage the global value stack, 
-//                and updated StackFrame to use base offsets into the global stack 
+//      26-02-20: Added GlobalStack struct to manage the global value stack,
+//                and updated StackFrame to use base offsets into the global stack
 //                instead of maintaining its own local register array
 //      26-02-20: Added upvalues field to StackFrame to support closure captures
 use crate::common::object::LuaValue;
@@ -10,7 +10,7 @@ use crate::common::object::LuaValue;
 pub struct StackFrame {
     pub func_name: String,
     pub base_offset: usize, // base offset in the global stack for this frame
-    pub reg_count: usize, // number of registers used by this frame
+    pub reg_count: usize,   // number of registers used by this frame
     pub pc: usize,
     pub ret_dest: Option<usize>,
     pub upvalues: Vec<LuaValue>, // captured upvalues for closures
@@ -35,7 +35,7 @@ impl GlobalStack {
         self.values.push(val);
     }
 
-    // discard values above the given offset 
+    // discard values above the given offset
     // used when returning from a function to clean up the stack
     pub fn restore(&mut self, offset: usize) {
         self.values.truncate(offset);
@@ -43,7 +43,13 @@ impl GlobalStack {
 }
 
 impl StackFrame {
-    pub fn new(name: String, ret_dest: Option<usize>, base_offset: usize, reg_count: usize, upvalues: Vec<LuaValue>) -> Self {
+    pub fn new(
+        name: String,
+        ret_dest: Option<usize>,
+        base_offset: usize,
+        reg_count: usize,
+        upvalues: Vec<LuaValue>,
+    ) -> Self {
         Self {
             func_name: name,
             base_offset,

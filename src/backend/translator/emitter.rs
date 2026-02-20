@@ -10,10 +10,10 @@
 //            correctly handled the indexing relationship between functions/variables and their corresponding strings in the constant pool.
 // 2026-02-20: Added support for upvalue access in the emitter
 
-use crate::frontend::ir::{IRFunction, IRInstruction, IROperand, IRTerminator, IRBinOp, IRUnOp};
 use crate::backend::translator::scanner::{Scanner, VarKind};
-use crate::common::opcode::{OpCode, UnaryOpType};
 use crate::common::object::LuaValue;
+use crate::common::opcode::{OpCode, UnaryOpType};
+use crate::frontend::ir::{IRBinOp, IRFunction, IRInstruction, IROperand, IRTerminator, IRUnOp};
 use std::collections::HashMap;
 
 pub struct BytecodeEmitter<'a> {
@@ -72,7 +72,10 @@ impl<'a> BytecodeEmitter<'a> {
                 match value {
                     IROperand::ImmFloat(f) => {
                         let c_idx = self.add_constant(LuaValue::Number(*f));
-                        self.bytecode.push(OpCode::LoadK { dest: d, const_idx: c_idx });
+                        self.bytecode.push(OpCode::LoadK {
+                            dest: d,
+                            const_idx: c_idx,
+                        });
                     }
                     IROperand::ImmBool(b) => {
                         self.bytecode.push(OpCode::LoadBool { dest: d, value: *b });
@@ -80,70 +83,189 @@ impl<'a> BytecodeEmitter<'a> {
                     IROperand::Nil => self.bytecode.push(OpCode::LoadNil { dest: d }),
                     IROperand::ImmStr(s) => {
                         let c_idx = self.add_constant(LuaValue::TempString(s.clone()));
-                        self.bytecode.push(OpCode::LoadK { dest: d, const_idx: c_idx });
+                        self.bytecode.push(OpCode::LoadK {
+                            dest: d,
+                            const_idx: c_idx,
+                        });
                     }
                     _ => {}
                 }
             }
 
-            IRInstruction::Binary { dest, src1, src2, operator } => {
+            IRInstruction::Binary {
+                dest,
+                src1,
+                src2,
+                operator,
+            } => {
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
                 let l = self.get_reg_index(src1);
                 let r = self.get_reg_index(src2);
 
                 match operator {
-                    IRBinOp::Add => self.bytecode.push(OpCode::Add { dest: d, left: l, right: r }),
-                    IRBinOp::Sub => self.bytecode.push(OpCode::Sub { dest: d, left: l, right: r }),
-                    IRBinOp::Mul => self.bytecode.push(OpCode::Mul { dest: d, left: l, right: r }),
-                    IRBinOp::Div => self.bytecode.push(OpCode::Div { dest: d, left: l, right: r }),
-                    IRBinOp::Pow => self.bytecode.push(OpCode::Pow { dest: d, left: l, right: r }),
-                    IRBinOp::Concat => self.bytecode.push(OpCode::Concat { dest: d, left: l, right: r }),
-                    IRBinOp::And => self.bytecode.push(OpCode::And { dest: d, left: l, right: r }),
-                    IRBinOp::Or => self.bytecode.push(OpCode::Or { dest: d, left: l, right: r }),
+                    IRBinOp::Add => self.bytecode.push(OpCode::Add {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Sub => self.bytecode.push(OpCode::Sub {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Mul => self.bytecode.push(OpCode::Mul {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Div => self.bytecode.push(OpCode::Div {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Pow => self.bytecode.push(OpCode::Pow {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Concat => self.bytecode.push(OpCode::Concat {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::And => self.bytecode.push(OpCode::And {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Or => self.bytecode.push(OpCode::Or {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
 
-                    IRBinOp::Eq  => self.bytecode.push(OpCode::Eq { dest: d, left: l, right: r }),
-                    IRBinOp::Neq => self.bytecode.push(OpCode::Ne { dest: d, left: l, right: r }),
-                    IRBinOp::Lt  => self.bytecode.push(OpCode::Lt { dest: d, left: l, right: r }),
-                    IRBinOp::Gt  => self.bytecode.push(OpCode::Gt { dest: d, left: l, right: r }),
-                    IRBinOp::Leq => self.bytecode.push(OpCode::Le { dest: d, left: l, right: r }),
-                    IRBinOp::Geq => self.bytecode.push(OpCode::Ge { dest: d, left: l, right: r }),
+                    IRBinOp::Eq => self.bytecode.push(OpCode::Eq {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Neq => self.bytecode.push(OpCode::Ne {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Lt => self.bytecode.push(OpCode::Lt {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Gt => self.bytecode.push(OpCode::Gt {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Leq => self.bytecode.push(OpCode::Le {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
+                    IRBinOp::Geq => self.bytecode.push(OpCode::Ge {
+                        dest: d,
+                        left: l,
+                        right: r,
+                    }),
                 }
             }
-            IRInstruction::Unary { dest, src, operator } => {
+            IRInstruction::Unary {
+                dest,
+                src,
+                operator,
+            } => {
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
                 let s = self.get_reg_index(src);
                 let op = match operator {
                     IRUnOp::Neg => UnaryOpType::Neg,
                     IRUnOp::Not => UnaryOpType::Not,
                 };
-                self.bytecode.push(OpCode::UnOp { dest: d, src: s, op });
+                self.bytecode.push(OpCode::UnOp {
+                    dest: d,
+                    src: s,
+                    op,
+                });
             }
 
-            IRInstruction::GetTable { dest, table, key } |
-            IRInstruction::IndexOf { dest, collection: table, index: key } |
-            IRInstruction::MemberOf { dest, collection: table, member: key } => {
+            IRInstruction::GetTable { dest, table, key }
+            | IRInstruction::IndexOf {
+                dest,
+                collection: table,
+                index: key,
+            }
+            | IRInstruction::MemberOf {
+                dest,
+                collection: table,
+                member: key,
+            } => {
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
                 let t = self.get_reg_index(table);
                 let k = self.get_reg_index(key);
-                self.bytecode.push(OpCode::GetTable { dest: d, table: t, key: k });
+                self.bytecode.push(OpCode::GetTable {
+                    dest: d,
+                    table: t,
+                    key: k,
+                });
             }
 
-            IRInstruction::SetTable { dest, table, key, value } |
-            IRInstruction::SetIndex { dest, collection: table, index: key, value } |
-            IRInstruction::SetMember { dest, collection: table, member: key, value } => {
+            IRInstruction::SetTable {
+                dest,
+                table,
+                key,
+                value,
+            }
+            | IRInstruction::SetIndex {
+                dest,
+                collection: table,
+                index: key,
+                value,
+            }
+            | IRInstruction::SetMember {
+                dest,
+                collection: table,
+                member: key,
+                value,
+            } => {
                 let t = self.get_reg_index(table);
                 let k = self.get_reg_index(key);
                 let v = self.get_reg_index(value);
-                self.bytecode.push(OpCode::SetTable { table: t, key: k, value: v });
+                self.bytecode.push(OpCode::SetTable {
+                    table: t,
+                    key: k,
+                    value: v,
+                });
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
                 self.bytecode.push(OpCode::Move { dest: d, src: v });
             }
 
-            IRInstruction::NewTable { dest, size_array, size_hash } => {
+            IRInstruction::NewTable {
+                dest,
+                size_array,
+                size_hash,
+            } => {
                 let d = self.get_phys_reg(VarKind::Reg(*dest));
-                let s_arr = if let IROperand::ImmFloat(f) = size_array { *f as u16 } else { 0 };
-                let s_hash = if let IROperand::ImmFloat(f) = size_hash { *f as u16 } else { 0 };
-                self.bytecode.push(OpCode::NewTable { dest: d, size_array: s_arr, size_hash: s_hash });
+                let s_arr = if let IROperand::ImmFloat(f) = size_array {
+                    *f as u16
+                } else {
+                    0
+                };
+                let s_hash = if let IROperand::ImmFloat(f) = size_hash {
+                    *f as u16
+                } else {
+                    0
+                };
+                self.bytecode.push(OpCode::NewTable {
+                    dest: d,
+                    size_array: s_arr,
+                    size_hash: s_hash,
+                });
             }
 
             IRInstruction::FnProto { dest, func_proto } => {
@@ -151,10 +273,15 @@ impl<'a> BytecodeEmitter<'a> {
 
                 let proto_name = match func_proto {
                     IROperand::Proto(name) => name,
-                    _ => panic!("[Emitter Error] FnProto expected IROperand::Proto, got: {:?}", func_proto),
+                    _ => panic!(
+                        "[Emitter Error] FnProto expected IROperand::Proto, got: {:?}",
+                        func_proto
+                    ),
                 };
 
-                let proto_idx = self.func_ir.sub_functions
+                let proto_idx = self
+                    .func_ir
+                    .sub_functions
                     .iter()
                     .position(|name| name == proto_name)
                     .expect(&format!(
@@ -164,7 +291,7 @@ impl<'a> BytecodeEmitter<'a> {
 
                 self.bytecode.push(OpCode::FnProto {
                     dest: d,
-                    proto_idx: proto_idx as u16
+                    proto_idx: proto_idx as u16,
                 });
             }
             IRInstruction::Call { dest, callee, args } => {
@@ -174,9 +301,16 @@ impl<'a> BytecodeEmitter<'a> {
                     let r_src = self.get_reg_index(arg);
                     self.bytecode.push(OpCode::Push { src: r_src });
                 }
-                self.bytecode.push(OpCode::Call { func_reg: r_func, argc: args.len() as u8, retc: 1 });
+                self.bytecode.push(OpCode::Call {
+                    func_reg: r_func,
+                    argc: args.len() as u8,
+                    retc: 1,
+                });
                 if r_dest != r_func {
-                    self.bytecode.push(OpCode::Move { dest: r_dest, src: r_func });
+                    self.bytecode.push(OpCode::Move {
+                        dest: r_dest,
+                        src: r_func,
+                    });
                 }
             }
 
@@ -217,7 +351,10 @@ impl<'a> BytecodeEmitter<'a> {
                 if let IROperand::Slot(id) = dst {
                     let slot = self.get_phys_reg(VarKind::Slot(*id));
                     let val = self.get_reg_index(src);
-                    self.bytecode.push(OpCode::Move { dest: slot, src: val });
+                    self.bytecode.push(OpCode::Move {
+                        dest: slot,
+                        src: val,
+                    });
                     let d = self.get_phys_reg(VarKind::Reg(*dest));
                     if d != val {
                         self.bytecode.push(OpCode::Move { dest: d, src: val });
@@ -232,9 +369,15 @@ impl<'a> BytecodeEmitter<'a> {
                 let upval_idx = if let IROperand::UpVal(id) = src {
                     id
                 } else {
-                    panic!("[Emitter Error] LoadUpVal expected IROperand::UpVal for src, got: {:?}", src);
+                    panic!(
+                        "[Emitter Error] LoadUpVal expected IROperand::UpVal for src, got: {:?}",
+                        src
+                    );
                 };
-                self.bytecode.push(OpCode::GetUpVal { dest: d, upval_idx: *upval_idx as u16 });
+                self.bytecode.push(OpCode::GetUpVal {
+                    dest: d,
+                    upval_idx: *upval_idx as u16,
+                });
             }
 
             IRInstruction::Drop { src: _ } => {
@@ -261,7 +404,11 @@ impl<'a> BytecodeEmitter<'a> {
                 self.bytecode.push(OpCode::Jump { offset: 0 });
                 self.pending_jumps.push((current_pc, *target_id));
             }
-            IRTerminator::Branch { cond, br_true, br_false } => {
+            IRTerminator::Branch {
+                cond,
+                br_true,
+                br_false,
+            } => {
                 let r_cond = self.get_reg_index(cond);
 
                 self.bytecode.push(OpCode::Test { reg: r_cond });
@@ -287,7 +434,11 @@ impl<'a> BytecodeEmitter<'a> {
     }
 
     fn get_phys_reg(&self, var: VarKind) -> u16 {
-        *self.scanner.reg_map.get(&(self.func_ir.name.clone(), var)).unwrap() as u16
+        *self
+            .scanner
+            .reg_map
+            .get(&(self.func_ir.name.clone(), var))
+            .unwrap() as u16
     }
 
     fn get_reg_index(&self, op: &IROperand) -> u16 {
