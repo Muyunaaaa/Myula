@@ -31,7 +31,7 @@ use crate::backend::translator::emitter::BytecodeEmitter;
 use crate::backend::translator::scanner::{Lifetime, Scanner};
 use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::heap::Heap;
-use crate::backend::vm::stack::StackFrame;
+use crate::backend::vm::stack::{GlobalStack, StackFrame};
 use crate::common::object::LuaValue;
 use crate::common::object::{GCObject, HeaderOnly, ObjectKind};
 use crate::common::opcode::OpCode;
@@ -65,6 +65,7 @@ const VM_THRESHOLD: usize = 1024 * 1024 ;//1MB
 
 pub struct VirtualMachine {
     pub call_stack: Vec<StackFrame>,
+    pub value_stack: GlobalStack,
     pub globals: HashMap<String, LuaValue>,
     pub module: IRModule,
     pub func_meta: HashMap<String, FuncMetadata>,
@@ -76,6 +77,7 @@ impl VirtualMachine {
     pub fn new() -> Self {
         Self {
             call_stack: Vec::new(),
+            value_stack: GlobalStack::default(),
             globals: HashMap::new(),
             module: IRModule { functions: vec![] },
             func_meta: HashMap::new(),
@@ -167,10 +169,45 @@ impl VirtualMachine {
         //TODO:完成其他标准库注册
     }
 
+    // util function to calculate the actual top of the stack for the current frame
+    // 0       1           m       m+1    m+2        m+n
+    // [value] [value] ... [value] [arg1] [arg2] ... [argN]
+    //                             | -> returns m+1
+    //
+    // this is because, in the new call convention
+    // caller can dynamically push args into the stack,
+    // however these args actually belong to the callee
+    fn get_actual_stack_top(&self) -> usize {
+        self.call_stack
+            .last()
+            .map(|frame| frame.base_offset + frame.reg_count)
+            .unwrap_or(0)
+    }
+
+    fn make_stack_frame(
+        &mut self, 
+        func_name: &str, 
+        frame_size: usize, 
+        return_dest: Option<usize>
+    ) -> StackFrame {
+        let base_offset = self.get_actual_stack_top();
+        self.value_stack.reserve(base_offset + frame_size);
+        StackFrame::new(
+            func_name.to_string(), 
+            return_dest, 
+            base_offset,
+            frame_size
+        )
+    }
+
     fn prepare_entry_frame(&mut self) {
         let entry_name = "_start";
         if let Some(meta) = self.func_meta.get(entry_name) {
-            let entry_frame = StackFrame::new(entry_name.to_string(), meta.max_stack_size, None);
+            let entry_frame = self.make_stack_frame(
+                entry_name, 
+                meta.max_stack_size,
+                None
+            );
             self.call_stack.push(entry_frame);
         } else {
             panic!(
@@ -321,8 +358,8 @@ impl VirtualMachine {
                     // 这样可以确保在 PC == lt.end 的那条指令执行时，数据依然有效
                     if frame.pc > lt.end {
                         // 只有当前不是 Nil 时才操作，减少不必要的赋值
-                        if !matches!(frame.registers[idx], LuaValue::Nil) {
-                            frame.registers[idx] = LuaValue::Nil;
+                        if !matches!(frame.get_reg(idx, &self.value_stack), LuaValue::Nil) {
+                            frame.set_reg(idx, LuaValue::Nil, &mut self.value_stack);
                         }
                     }
                 }
@@ -336,10 +373,8 @@ impl VirtualMachine {
                 self.mark_value(value);
             }
 
-            for frame in &self.call_stack {
-                for value in &frame.registers {
-                    self.mark_value(value);
-                }
+            for value in &self.value_stack.values {
+                self.mark_value(value);
             }
 
             for meta in self.func_meta.values() {
@@ -489,12 +524,18 @@ impl VirtualMachine {
                 println!("  Frame #{} -> Function: {}", depth, frame.func_name);
                 println!("    PC: {}", frame.pc);
                 print!("    Registers: ");
-                for (i, val) in frame.registers.iter().enumerate() {
-                    print!("[R{}:{:?}] ", i, val);
+                for i in 0..frame.reg_count {
+                    print!("R{}:{:?} ", i, frame.get_reg(i, &self.value_stack));
                 }
                 println!();
             }
         }
+
+        println!("\n[3. Global Stack]");
+        for (idx, val) in self.value_stack.values.iter().enumerate() {
+            println!("  [{}] {:?}", idx, val);
+        }
+
         println!("{}\n", "=".repeat(50));
     }
 
@@ -517,11 +558,11 @@ impl VirtualMachine {
     }
 
     fn get_reg(&self, idx: usize) -> &LuaValue {
-        &self.call_stack.last().unwrap().registers[idx]
+        &self.call_stack.last().unwrap().get_reg(idx, &self.value_stack)
     }
 
     fn set_reg(&mut self, idx: usize, val: LuaValue) {
-        self.call_stack.last_mut().unwrap().registers[idx] = val;
+        self.call_stack.last_mut().unwrap().set_reg(idx, val, &mut self.value_stack);
     }
 
     fn get_constant(&self, idx: usize) -> &LuaValue {

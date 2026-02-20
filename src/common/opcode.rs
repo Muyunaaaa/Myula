@@ -43,6 +43,7 @@ pub enum OpCode {
     
     FnProto { dest: u16, proto_idx: u16 }, 
     Call { func_reg: u16, argc: u8, retc: u8 },
+    Push { src: u16 },
     Return { start: u16, count: u8 },
 
     Halt,
@@ -73,6 +74,7 @@ impl fmt::Display for OpCode {
             OpCode::GetTable { dest, table, key } => write!(f, "GETTABLE R{} R{} R{}", dest, table, key),
             OpCode::SetTable { table, key, value } => write!(f, "SETTABLE R{} R{} R{}", table, key, value),
             OpCode::Call { func_reg, argc, retc } => write!(f, "CALL     R{} {} {}", func_reg, argc, retc),
+            OpCode::Push { src } => write!(f, "PUSH     R{}", src),
             OpCode::Return { start, count } => write!(f, "RETURN   R{} {}", start, count),
             OpCode::Jump { offset } => write!(f, "JUMP     {}", offset),
             OpCode::Test { reg } => write!(f, "TEST     R{}", reg),

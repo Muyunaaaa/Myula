@@ -33,19 +33,12 @@ impl VirtualMachine {
                         func_name
                     ))))?;
 
-                let mut new_frame = StackFrame {
-                    func_name: func_name.clone(),
-                    registers: vec![LuaValue::Nil; meta.max_stack_size],
-                    pc: 0,
-                    ret_dest: Some(func_reg as usize),
-                };
-
-                for i in 0..(argc as usize) {
-                    let arg_val = self.get_reg(func_reg as usize + 1 + i).clone();
-                    if i < new_frame.registers.len() {
-                        new_frame.registers[i] = arg_val;
-                    }
-                }
+                let new_frame = 
+                    self.make_stack_frame(
+                        func_name, 
+                        meta.max_stack_size, 
+                        Some(func_reg as usize),
+                    );
 
                 self.call_stack.push(new_frame);
                 Ok(())
@@ -53,9 +46,21 @@ impl VirtualMachine {
 
             LuaValue::CFunc(c_func) => {
                 let func_idx = func_reg as usize;
-                let base_reg = func_idx + 1;
 
-                let num_results = c_func(self, base_reg, argc as usize)?;
+                let stack_top = self.get_actual_stack_top();
+                let new_frame = self.make_stack_frame(
+                    &format!("__native_{}", func_idx), 
+                    0, 
+                    Some(func_idx)
+                );
+
+                // push dummy frame
+                self.call_stack.push(new_frame);
+                let num_results = c_func(self, argc as usize)?;
+
+                // restore, clean up dummy frame and args
+                self.call_stack.pop();
+                self.value_stack.restore(stack_top);
 
                 if retc > 0 {
                     let expected = (retc - 1) as usize;
@@ -63,6 +68,7 @@ impl VirtualMachine {
                         self.set_reg(func_idx + i, LuaValue::Nil);
                     }
                 }
+
                 Ok(())
             }
 
@@ -78,14 +84,30 @@ impl VirtualMachine {
             }
         }
     }
+
+    /// PUSH
+    pub fn handle_push(&mut self, src: u16) -> Result<(), VMError> {
+        let val = self.get_reg(src as usize).clone();
+        self.value_stack.push(val);
+
+        self.call_stack.last_mut().unwrap().pc += 1;
+
+        Ok(())
+    }
+
     /// RETURN
+    /// 我非常不建议使用这种策略处理返回值，单个还好说，多个又会变得跟之前那种寄存器传参模式一样乱七八糟的
+    /// Native Call 那边也是一样
+    /// 但如果不做多返回值支持，这个就无所谓了
+    /// 行为是对的，但是寄存器乱飞
+    /// - Li
     pub fn handle_return(&mut self, start: u16, count: u8) -> Result<(), VMError> {
         let mut results = Vec::new();
         for i in 0..(count as usize) {
             results.push(self.get_reg(start as usize + i).clone());
         }
 
-        let current_frame = self.call_stack.pop()
+        let last_frame = self.call_stack.pop()
             .ok_or_else(|| self.error(ErrorKind::InternalError(
                 "StackUnderflowException: attempt to return from an empty call stack".into()
             )))?;
@@ -94,16 +116,18 @@ impl VirtualMachine {
             return Ok(());
         }
 
-        if let Some(dest_idx) = current_frame.ret_dest {
+        if let Some(dest_idx) = last_frame.ret_dest {
             if let Some(caller_frame) = self.call_stack.last_mut() {
                 for (i, val) in results.into_iter().enumerate() {
                     let target_idx = dest_idx + i;
-                    if target_idx < caller_frame.registers.len() {
-                        caller_frame.registers[target_idx] = val;
+                    if target_idx < caller_frame.reg_count {
+                        caller_frame.set_reg(target_idx, val, &mut self.value_stack);
                     }
                 }
             }
         }
+
+        self.value_stack.restore(last_frame.base_offset);
 
         Ok(())
     }
