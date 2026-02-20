@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 #[test]
 fn test_vm_from_file() {
-    let file_path = "./lua_tests/self/02_string_gc.lua";
+    let file_path = "./lua_tests/self/ex03_len_and_mod_test.lua";
     assert!(
         Path::new(file_path).exists(),
         "测试文件不存在: {}",
