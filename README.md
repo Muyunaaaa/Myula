@@ -49,7 +49,7 @@ The Myula compilation pipeline follows classic compiler design, deeply optimized
 | **Functions**    | First-class Functions       | ✅          | Supports nested definitions and first-class passing    |
 |                  | Native Interop              | ✅          | Call Rust native code via `CFunc`                      |
 |                  | Multi-return                | 🏗          | Refactoring `handle_return` for contiguous space       |
-|                  | Closures                    | 🏗          | Upvalue capture logic in planning                      |
+|                  | Closures                    | ✅          | Upvalue capture logic in planning                      |
 
 ## 🛠 Module Features
 
@@ -58,6 +58,7 @@ The Myula compilation pipeline follows classic compiler design, deeply optimized
 - **Global Linear Stack Model**: Breaks away from traditional independent frame arrays. All registers are physically contiguous, localized via a `base_offset`.
 - **Mark-sweep GC**: Implements traditional Garbage Collection by traversing global variables, constant pools, and all active registers to reclaim memory.
 - **Zero-Copy Calling Convention**: Arguments are pre-aligned at the top of the physical stack before a call, allowing the callee to take "in-place ownership" of parameters.
+- **Hierarchical Upvalue Management**: Implements Lexical Scoping by capturing local variables into heap-allocated Upvalues. Supports Open-to-Closed state transition, ensuring that closures remain valid even after the owner function's stack frame is reclaimed.
 
 ### 2. Scanner (Register Allocator)
 
