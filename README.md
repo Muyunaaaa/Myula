@@ -2,7 +2,7 @@
 
 Myula is a high-performance embedded scripting language implementation written in Rust. Drawing inspiration from the elegance of Lua, it introduces significant innovations in virtual machine architecture. By combining a **Register-based Instruction Set Architecture (ISA)** with a **Global Linear Stack**, Myula provides an execution environment characterized by an extremely low memory footprint and high efficiency.
 
-<img src="myula.png" alt="myula" style="zoom:33%;" />
+![myula](https://github.com/user-attachments/assets/01d6ab69-6300-467c-ad2a-1460766d8a27)
 
 ## 📦 Installation & Usage
 
