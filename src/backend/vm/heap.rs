@@ -72,6 +72,15 @@ impl Heap {
         self.alloc_raw_object(data, ObjectKind::Function, size)
     }
 
+    pub fn alloc_upvalue_object(
+        &mut self,
+        upval: crate::common::object::LuaUpValue,
+    ) -> Option<*mut GCObject<crate::common::object::LuaUpValue>> {
+        let size = std::mem::size_of::<GCObject<crate::common::object::LuaUpValue>>();
+
+        self.alloc_raw_object(upval, ObjectKind::UpValue, size)
+    }
+
     fn alloc_raw_object<T>(
         &mut self,
         data: T,
@@ -95,7 +104,7 @@ impl Heap {
 
         self.total_allocated += size;
 
-        if (self.total_allocated > self.max_allocated) {
+        if self.total_allocated > self.max_allocated {
             self.max_allocated = self.total_allocated;
         }
 
