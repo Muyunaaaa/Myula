@@ -36,14 +36,13 @@ use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::backend::vm::heap::Heap;
 use crate::backend::vm::stack::{GlobalStack, StackFrame};
 use crate::backend::vm::std_lib::lua_builtin_print;
-use crate::common::object::LuaValue;
 use crate::common::object::{GCObject, HeaderOnly, ObjectKind};
+use crate::common::object::{LuaUpValue, LuaUpValueState, LuaValue};
 use crate::common::opcode::OpCode;
 use crate::frontend::ir::{IRGenerator, IRModule, IRUpVal};
 use clap::ValueEnum;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
-use std::ops::Index;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum LogLevel {
@@ -65,6 +64,10 @@ pub struct FuncMetadata {
 const MAX_CALL_STACK: usize = 1000;
 const HARD_MEMORY_LIMIT: usize = 1024 * 1024 * 512; //512MB
 const VM_THRESHOLD: usize = 1024 * 1024; //1MB
+
+// number of padded regs at the end of each stack frame
+// to support some functionalities
+const NUM_PAD_REGS: usize = 2;
 
 pub struct VirtualMachine {
     pub call_stack: Vec<StackFrame>,
@@ -139,7 +142,7 @@ impl VirtualMachine {
                 bytecode,
                 constants,
                 num_locals,
-                max_stack_size: max_usage + 2, //FIXME:这里的 +2 是为了给函数调用时的返回地址和参数留出空间，后续可以根据实际情况调整
+                max_stack_size: max_usage + NUM_PAD_REGS,
                 reg_metadata: reg_info_map,
                 upvalues_metadata: upvalues,
                 child_protos: func_ir.sub_functions.clone(),
@@ -209,7 +212,7 @@ impl VirtualMachine {
         func_name: &str,
         frame_size: usize,
         return_dest: Option<usize>,
-        upvalues: Vec<LuaValue>,
+        upvalues: Vec<*mut GCObject<LuaUpValue>>,
     ) -> StackFrame {
         let base_offset = self.get_actual_stack_top();
         self.value_stack.reserve(base_offset + frame_size);
@@ -220,6 +223,26 @@ impl VirtualMachine {
             frame_size,
             upvalues,
         )
+    }
+
+    fn push_frame(&mut self, frame: StackFrame) {
+        self.call_stack.push(frame);
+    }
+
+    fn pop_frame(&mut self) -> Option<StackFrame> {
+        let frame = self.call_stack.pop()?;
+        // close any open upvalues that escape from this frame
+        for (_, upval_ptr) in &frame.out_upvalues {
+            unsafe {
+                let upval = &mut **upval_ptr;
+                if let LuaUpValueState::Open(stack_idx) = upval.data.value {
+                    // close the upvalue by capturing the current value from the stack
+                    let val = self.get_reg_absolute(stack_idx).clone();
+                    upval.data.value = LuaUpValueState::Closed(val);
+                }
+            }
+        }
+        Some(frame)
     }
 
     fn prepare_entry_frame(&mut self) {
@@ -408,7 +431,14 @@ impl VirtualMachine {
             for stack_frame in &self.call_stack {
                 // for stack frames, mark upvalues
                 for upval in &stack_frame.upvalues {
-                    self.mark_value(upval);
+                    let upval = &mut **upval;
+                    upval.mark = true; // mark the upvalue object itself to prevent it from being collected
+
+                    // only mark closed upvalues,
+                    // because open upvalues point to stack slots
+                    if let LuaUpValueState::Closed(val) = &upval.data.value {
+                        self.mark_value(val);
+                    }
                 }
             }
         }
@@ -460,6 +490,11 @@ impl VirtualMachine {
                                 p_curr as *mut GCObject<crate::common::object::LFunction>,
                             );
                         }
+                        ObjectKind::UpValue => {
+                            let _ = Box::from_raw(
+                                p_curr as *mut GCObject<crate::common::object::LuaUpValue>,
+                            );
+                        }
                     }
 
                     p_curr = p_next;
@@ -502,7 +537,13 @@ impl VirtualMachine {
                             self.mark_value(val);
                         }
                         for upval in &(*(*ptr)).data.upvalues {
-                            self.mark_value(upval);
+                            // open upvalues points to stack slots
+                            let upval = &mut **upval;
+                            // mark the upvalue object itself to prevent it from being collected
+                            upval.mark = true;
+                            if let LuaUpValueState::Closed(val) = &upval.data.value {
+                                self.mark_value(val);
+                            }
                         }
                     }
                 }
@@ -588,6 +629,7 @@ impl VirtualMachine {
         }
     }
 
+    // get the value of a register in the current frame, with bounds checking
     fn get_reg(&self, idx: usize) -> &LuaValue {
         &self
             .call_stack
@@ -596,11 +638,20 @@ impl VirtualMachine {
             .get_reg(idx, &self.value_stack)
     }
 
+    // get the value of a register by absolute stack index, used for upvalue capture
+    fn get_reg_absolute(&self, idx_abs: usize) -> &LuaValue {
+        &self.value_stack.values[idx_abs]
+    }
+
     fn set_reg(&mut self, idx: usize, val: LuaValue) {
         self.call_stack
             .last_mut()
             .unwrap()
             .set_reg(idx, val, &mut self.value_stack);
+    }
+
+    fn set_reg_absolute(&mut self, idx_abs: usize, val: LuaValue) {
+        self.value_stack.values[idx_abs] = val;
     }
 
     fn get_constant(&self, idx: usize) -> &LuaValue {

@@ -1,7 +1,9 @@
+use std::ptr::null_mut;
+
 use crate::backend::vm::VirtualMachine;
 use crate::backend::vm::error::{ErrorKind, VMError};
-use crate::common::object::LuaValue;
-use crate::frontend::ir::{IRUpVal, IRUpValType};
+use crate::common::object::{GCObject, LuaUpValue, LuaUpValueState, LuaValue};
+use crate::frontend::ir::IRUpValType;
 
 impl VirtualMachine {
     pub fn handle_fn_proto(&mut self, dest: u16, proto_idx: u16) -> Result<(), VMError> {
@@ -30,20 +32,52 @@ impl VirtualMachine {
             )))
         })?;
 
-        let captured_upvalues: Vec<LuaValue> = sub_meta
+        let mut err: Option<ErrorKind> = None;
+        let mut out_upvalues: Vec<(usize, *mut GCObject<LuaUpValue>)> = vec![];
+        let captured_upvalues: Vec<*mut GCObject<LuaUpValue>> = sub_meta
             .upvalues_metadata
             .iter()
             .map(|upval| match upval.ty {
                 IRUpValType::LocalVar(slot) => {
-                    curr_frame.get_reg(slot as usize, &self.value_stack).clone()
+                    let search = curr_frame
+                        .out_upvalues
+                        .binary_search_by_key(&slot, |(s, _)| *s);
+                    if let Ok(idx) = search {
+                        // this slot is already captured by current frame, reuse the upvalue object
+                        return curr_frame.out_upvalues[idx].1;
+                    }
+
+                    let reg_idx = curr_frame.reg_absolute(slot);
+                    // create a new open upvalue pointing to the stack slot
+                    let upval_ptr = self
+                        .heap
+                        .alloc_upvalue_object(LuaUpValue {
+                            value: LuaUpValueState::Open(reg_idx),
+                        })
+                        .ok_or_else(|| {
+                            err = Some(ErrorKind::OutOfMemory);
+                            null_mut::<GCObject<LuaUpValue>>()
+                        })
+                        .unwrap();
+                    out_upvalues.push((slot, upval_ptr));
+                    upval_ptr
                 }
-                IRUpValType::UpVal(slot) => curr_frame
-                    .upvalues
-                    .get(slot)
-                    .unwrap_or(&LuaValue::Nil)
-                    .clone(),
+                IRUpValType::UpVal(slot) => {
+                    curr_frame.upvalues.get(slot).unwrap_or(&null_mut()).clone()
+                }
             })
             .collect();
+
+        if let Some(e) = err {
+            self.error(e);
+        }
+
+        // update exported upvalues of current frame
+        self.call_stack
+            .last_mut()
+            .unwrap()
+            .out_upvalues
+            .append(&mut out_upvalues);
 
         let new_func = crate::common::object::LFunction {
             name: sub_func_name.clone(),

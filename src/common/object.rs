@@ -2,7 +2,6 @@ use crate::backend::vm::VirtualMachine;
 use crate::backend::vm::error::VMError;
 use std::collections::HashMap;
 use std::fmt;
-use std::hash::{Hash, Hasher};
 
 pub type CFunction = fn(&mut VirtualMachine, usize) -> Result<usize, VMError>;
 
@@ -15,6 +14,7 @@ pub struct LuaTable {
 pub struct HeaderOnly;
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct GCObject<T> {
     pub mark: bool,
     pub kind: ObjectKind,
@@ -28,6 +28,7 @@ pub enum ObjectKind {
     String,
     Table,
     Function,
+    UpValue,
 }
 
 #[derive(Clone, PartialEq)]
@@ -41,6 +42,17 @@ pub enum LuaValue {
     CFunc(CFunction),
     UserData(*mut std::ffi::c_void),
     TempString(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum LuaUpValueState {
+    Open(usize),      // inside a stack frame, offset relative to the bottom of the stack
+    Closed(LuaValue), // closed over value
+}
+
+#[derive(Debug, Clone)]
+pub struct LuaUpValue {
+    pub value: LuaUpValueState,
 }
 
 impl LuaValue {
@@ -124,7 +136,7 @@ pub struct LFunction {
     pub name: String,
     pub opcodes: Vec<crate::common::opcode::OpCode>,
     pub constants: Vec<LuaValue>,
-    pub upvalues: Vec<LuaValue>,
+    pub upvalues: Vec<*mut GCObject<LuaUpValue>>,
     pub num_locals: usize,
     pub max_stack_size: usize,
 }

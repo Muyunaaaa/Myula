@@ -9,6 +9,9 @@
 //            ensured that identical string constants are stored only once;
 //            correctly handled the indexing relationship between functions/variables and their corresponding strings in the constant pool.
 // 2026-02-20: Added support for upvalue access in the emitter
+// 2026-02-21: Changed the behavior of Return terminator,
+//             It should not move return values to R0, instead it should directly return the register where the return value is located,
+//             Otherwise it causes extremely unpredictable behaviors
 
 use crate::backend::translator::scanner::{Scanner, VarKind};
 use crate::common::object::LuaValue;
@@ -386,11 +389,29 @@ impl<'a> BytecodeEmitter<'a> {
                 });
             }
 
+            IRInstruction::StoreUpVal { dest, dst, src } => {
+                let s = self.get_reg_index(src);
+                let upval_idx = if let IROperand::UpVal(id) = dst {
+                    id
+                } else {
+                    panic!(
+                        "[Emitter Error] StoreUpVal expected IROperand::UpVal for dst, got: {:?}",
+                        dst
+                    );
+                };
+                self.bytecode.push(OpCode::SetUpVal {
+                    upval_idx: *upval_idx as u16,
+                    src: s,
+                });
+                let d = self.get_phys_reg(VarKind::Reg(*dest));
+                if d != s {
+                    self.bytecode.push(OpCode::Move { dest: d, src: s });
+                }
+            }
+
             IRInstruction::Drop { src: _ } => {
                 // psedo instr, used for lifetime analysis, just ignore
             }
-
-            _ => unimplemented!("[Emitter Error] Unsupported IR instruction: {:?}", instr),
         }
     }
 
@@ -399,9 +420,11 @@ impl<'a> BytecodeEmitter<'a> {
             IRTerminator::Return(vals) => {
                 if let Some(val) = vals.first() {
                     let r = self.get_reg_index(val);
-                    self.bytecode.push(OpCode::Move { dest: 0, src: r });
-                    self.bytecode.push(OpCode::Return { start: 0, count: 1 });
+                    self.bytecode.push(OpCode::Return { start: r, count: 1 });
                 } else {
+                    // todo: this is not ideal
+                    // if the function has no return,
+                    // should return a unit value rather than this random stuff in R0
                     self.bytecode.push(OpCode::Return { start: 0, count: 0 });
                 }
             }

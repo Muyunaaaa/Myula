@@ -1,6 +1,5 @@
 use crate::backend::vm::VirtualMachine;
 use crate::backend::vm::error::{ErrorKind, VMError};
-use crate::backend::vm::stack::StackFrame;
 use crate::common::object::LuaValue;
 
 impl VirtualMachine {
@@ -40,7 +39,7 @@ impl VirtualMachine {
                     func_obj.upvalues.clone(),
                 );
 
-                self.call_stack.push(new_frame);
+                self.push_frame(new_frame);
                 Ok(())
             }
 
@@ -56,11 +55,11 @@ impl VirtualMachine {
                 );
 
                 // push dummy frame
-                self.call_stack.push(new_frame);
+                self.push_frame(new_frame);
                 let num_results = c_func(self, argc as usize)?;
 
                 // restore, clean up dummy frame and args
-                self.call_stack.pop();
+                self.pop_frame();
                 self.value_stack.restore(stack_top);
 
                 if retc > 0 {
@@ -116,7 +115,7 @@ impl VirtualMachine {
             results.push(self.get_reg(start as usize + i).clone());
         }
 
-        let last_frame = self.call_stack.pop().ok_or_else(|| {
+        let last_frame = self.pop_frame().ok_or_else(|| {
             self.error(ErrorKind::InternalError(
                 "StackUnderflowException: attempt to return from an empty call stack".into(),
             ))

@@ -18,7 +18,7 @@ local function stress_test()
         total_sum = total_sum + adder(1)
 
         -- 每 1000 次尝试通过创建一个大表来迫使分配器工作
-        if i < 1000 then
+        if i % 1000 == 0 then
             local junk = {1, 2, 3, 4, 5}
             print("  Progress: " .. i)
         end

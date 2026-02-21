@@ -5,7 +5,7 @@
 //                and updated StackFrame to use base offsets into the global stack
 //                instead of maintaining its own local register array
 //      26-02-20: Added upvalues field to StackFrame to support closure captures
-use crate::common::object::LuaValue;
+use crate::common::object::{GCObject, LuaUpValue, LuaValue};
 
 pub struct StackFrame {
     pub func_name: String,
@@ -13,7 +13,10 @@ pub struct StackFrame {
     pub reg_count: usize,   // number of registers used by this frame
     pub pc: usize,
     pub ret_dest: Option<usize>,
-    pub upvalues: Vec<LuaValue>, // captured upvalues for closures
+    // upvalues **CAPUTURED** by the function prototype that this frame is executing
+    pub upvalues: Vec<*mut GCObject<LuaUpValue>>,
+    // upvalues **ESCAPED** from this frame that need to be closed when this frame is popped
+    pub out_upvalues: Vec<(usize, *mut GCObject<LuaUpValue>)>,
 }
 
 #[derive(Default)]
@@ -48,7 +51,7 @@ impl StackFrame {
         ret_dest: Option<usize>,
         base_offset: usize,
         reg_count: usize,
-        upvalues: Vec<LuaValue>,
+        upvalues: Vec<*mut GCObject<LuaUpValue>>,
     ) -> Self {
         Self {
             func_name: name,
@@ -57,7 +60,12 @@ impl StackFrame {
             ret_dest,
             reg_count,
             upvalues,
+            out_upvalues: vec![],
         }
+    }
+
+    pub fn reg_absolute(&self, idx: usize) -> usize {
+        self.base_offset + idx
     }
 }
 
