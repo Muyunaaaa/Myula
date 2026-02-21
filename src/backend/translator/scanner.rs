@@ -218,6 +218,15 @@ impl Scanner {
                 // todo: is it really necessary to record the use of upvalue here?
                 // since it has ambiguous lifetime
             }
+            IRInstruction::StoreUpVal {
+                dest,
+                dst: _dst,
+                src,
+            } => {
+                self.record_def(func_name, VarKind::Reg(*dest), false, None);
+                // similar to LoadUpVal, the use of upvalue is not recorded here
+                self.record_use(func_name, src);
+            }
             IRInstruction::Drop { src } => {
                 self.record_use(func_name, src);
             }

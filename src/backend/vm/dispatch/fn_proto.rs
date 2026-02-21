@@ -1,9 +1,9 @@
-use std::ptr::{null, null_mut};
+use std::ptr::null_mut;
 
 use crate::backend::vm::VirtualMachine;
 use crate::backend::vm::error::{ErrorKind, VMError};
 use crate::common::object::{GCObject, LuaUpValue, LuaUpValueState, LuaValue};
-use crate::frontend::ir::{IRUpVal, IRUpValType};
+use crate::frontend::ir::IRUpValType;
 
 impl VirtualMachine {
     pub fn handle_fn_proto(&mut self, dest: u16, proto_idx: u16) -> Result<(), VMError> {

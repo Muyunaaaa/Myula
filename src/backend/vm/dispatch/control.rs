@@ -1,6 +1,5 @@
 use crate::backend::vm::VirtualMachine;
 use crate::backend::vm::error::{ErrorKind, VMError};
-use crate::backend::vm::stack::StackFrame;
 use crate::common::object::LuaValue;
 
 impl VirtualMachine {

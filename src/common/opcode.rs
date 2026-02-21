@@ -37,6 +37,10 @@ pub enum OpCode {
         dest: u16,
         upval_idx: u16,
     },
+    SetUpVal {
+        upval_idx: u16,
+        src: u16,
+    },
 
     Add {
         dest: u16,
@@ -174,6 +178,7 @@ impl fmt::Display for OpCode {
             OpCode::GetGlobal { dest, name_idx } => write!(f, "GETGLOBAL R{} K{}", dest, name_idx),
             OpCode::SetGlobal { name_idx, src } => write!(f, "SETGLOBAL K{} R{}", name_idx, src),
             OpCode::GetUpVal { dest, upval_idx } => write!(f, "GETUPVAL R{} U{}", dest, upval_idx),
+            OpCode::SetUpVal { upval_idx, src } => write!(f, "SETUPVAL U{} R{}", upval_idx, src),
             OpCode::Add { dest, left, right } => {
                 write!(f, "ADD      R{} R{} R{}", dest, left, right)
             }

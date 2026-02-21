@@ -21,6 +21,7 @@ impl VirtualMachine {
             OpCode::SetGlobal { name_idx, src } => self.handle_set_global(name_idx, src),
 
             OpCode::GetUpVal { dest, upval_idx } => self.handle_get_upval(dest, upval_idx),
+            OpCode::SetUpVal { upval_idx, src } => self.handle_set_upval(upval_idx, src),
 
             OpCode::Add { dest, left, right } => self.handle_add(dest, left, right),
             OpCode::Sub { dest, left, right } => self.handle_sub(dest, left, right),

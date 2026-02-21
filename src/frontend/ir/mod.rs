@@ -230,6 +230,15 @@ pub enum IRInstruction {
         dest: usize,
         src: IROperand,
     },
+    // %dest = StoreUpVal %upval_slot, %src
+    // store the value of %src into upvalue at slot %upval_slot
+    // returns the value stored, for chained assignment support
+    // %upval_slot is guaranteed to be a IROperand::UpVal
+    StoreUpVal {
+        dest: usize,
+        dst: IROperand,
+        src: IROperand,
+    },
     // %nil = Drop %src
     // drop the value in register %src, used for discarding values that are not needed
     // for example, the return value of a function call that is not used,
@@ -388,6 +397,14 @@ impl IRInstruction {
             }
             IRInstruction::LoadUpVal { dest, src } => {
                 format!("%{} = LoadUpVal {}", dest, src.to_string())
+            }
+            IRInstruction::StoreUpVal { dest, dst, src } => {
+                format!(
+                    "%{} = StoreUpVal {} {}",
+                    dest,
+                    dst.to_string(),
+                    src.to_string()
+                )
             }
             IRInstruction::Drop { src } => {
                 format!("%nil = Drop {}", src.to_string())
@@ -959,9 +976,15 @@ impl IRGenerator {
                         });
                         return IROperand::Reg(dest_reg);
                     }
-                    _ => {
-                        self.emit_err(IRGeneratorError::UndefinedVariable(name.clone()));
-                        unimplemented!("Assignment to undefined variable or upvalue");
+                    Some(IRValueScope::UpVal(upval)) => {
+                        // upvalue
+                        let dest_reg = self.alloc_reg();
+                        self.emit(IRInstruction::StoreUpVal {
+                            dest: dest_reg,
+                            dst: IROperand::UpVal(upval.slot),
+                            src: src.clone(),
+                        });
+                        return IROperand::Reg(dest_reg);
                     }
                 };
             }

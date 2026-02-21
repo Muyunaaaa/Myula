@@ -650,6 +650,10 @@ impl VirtualMachine {
             .set_reg(idx, val, &mut self.value_stack);
     }
 
+    fn set_reg_absolute(&mut self, idx_abs: usize, val: LuaValue) {
+        self.value_stack.values[idx_abs] = val;
+    }
+
     fn get_constant(&self, idx: usize) -> &LuaValue {
         let frame = self.call_stack.last().unwrap();
         &self.func_meta.get(&frame.func_name).unwrap().constants[idx]
