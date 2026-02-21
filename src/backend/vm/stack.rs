@@ -29,21 +29,18 @@ impl GlobalStack {
     pub fn reserve(&mut self, min_size: usize) {
         let current_len = self.values.len();
         if current_len < min_size {
-            println!("Reserving stack space: expanding from {} to {} slots", current_len, min_size);
             self.values.resize(min_size, LuaValue::Nil);
         }
     }
 
     // push a value onto the stack
     pub fn push(&mut self, val: LuaValue) {
-        println!("Pushing value onto stack: {:?}", val);
         self.values.push(val);
     }
 
     // discard values above the given offset
     // used when returning from a function to clean up the stack
     pub fn restore(&mut self, offset: usize) {
-        println!("Restoring stack to offset {}: discarding {} values", offset, self.values.len() - offset,);
         self.values.truncate(offset);
     }
 }

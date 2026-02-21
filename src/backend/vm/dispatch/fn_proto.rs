@@ -43,13 +43,11 @@ impl VirtualMachine {
                         .out_upvalues
                         .binary_search_by_key(&slot, |(s, _)| *s);
                     if let Ok(idx) = search {
-                        println!("Reusing already captured upvalue for local variable at slot {} in sub-function '{}'", slot, sub_func_name);
                         // this slot is already captured by current frame, reuse the upvalue object
                         return curr_frame.out_upvalues[idx].1;
                     }
 
                     let reg_idx = curr_frame.reg_absolute(slot);
-                    println!("Capturing local variable at slot {} (absolute reg {}) for sub-function '{}'", slot, reg_idx, sub_func_name);
                     // create a new open upvalue pointing to the stack slot
                     let upval_ptr = self
                         .heap

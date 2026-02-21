@@ -65,6 +65,10 @@ const MAX_CALL_STACK: usize = 1000;
 const HARD_MEMORY_LIMIT: usize = 1024 * 1024 * 512; //512MB
 const VM_THRESHOLD: usize = 1024 * 1024; //1MB
 
+// number of padded regs at the end of each stack frame
+// to support some functionalities
+const NUM_PAD_REGS: usize = 2;
+
 pub struct VirtualMachine {
     pub call_stack: Vec<StackFrame>,
     pub value_stack: GlobalStack,
@@ -138,7 +142,7 @@ impl VirtualMachine {
                 bytecode,
                 constants,
                 num_locals,
-                max_stack_size: max_usage + 2, //FIXME:这里的 +2 是为了给函数调用时的返回地址和参数留出空间，后续可以根据实际情况调整
+                max_stack_size: max_usage + NUM_PAD_REGS,
                 reg_metadata: reg_info_map,
                 upvalues_metadata: upvalues,
                 child_protos: func_ir.sub_functions.clone(),
@@ -234,11 +238,6 @@ impl VirtualMachine {
                 if let LuaUpValueState::Open(stack_idx) = upval.data.value {
                     // close the upvalue by capturing the current value from the stack
                     let val = self.get_reg_absolute(stack_idx).clone();
-                    println!("Closing upvalue for stack slot {} with value {:?} as the frame '{}' is being popped", stack_idx, val, frame.func_name);
-                    println!("Global stack state at the moment of closing upvalue: ");
-                    for i in 0..self.value_stack.values.len() {
-                        println!("  [{}]: {:?}", i, self.value_stack.values[i]);
-                    }
                     upval.data.value = LuaUpValueState::Closed(val);
                 }
             }

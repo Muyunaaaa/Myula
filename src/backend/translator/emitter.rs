@@ -399,9 +399,11 @@ impl<'a> BytecodeEmitter<'a> {
             IRTerminator::Return(vals) => {
                 if let Some(val) = vals.first() {
                     let r = self.get_reg_index(val);
-                    self.bytecode.push(OpCode::Move { dest: 0, src: r });
-                    self.bytecode.push(OpCode::Return { start: 0, count: 1 });
+                    self.bytecode.push(OpCode::Return { start: r, count: 1 });
                 } else {
+                    // todo: this is not ideal
+                    // if the function has no return, 
+                    // should return a unit value rather than this random stuff in R0
                     self.bytecode.push(OpCode::Return { start: 0, count: 0 });
                 }
             }
