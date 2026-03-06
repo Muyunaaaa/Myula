@@ -1,4 +1,4 @@
-# Myulav
+# Myula
 
 <div align="center">
   <img src="./img/logo.png" width="480" />
