@@ -1,8 +1,10 @@
-# Myula
+# Myulav
+
+<div align="center">
+  <img src="./img/logo.png" width="480" />
+</div>
 
 Myula is an experimental Lua 1.1 partial-compatible Lua runtime with future language features and a SSA IR.
-
-![myula](./img/logo.svg)
 
 To try it out, go
 
